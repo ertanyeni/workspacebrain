@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "workspacebrain"
+version = "0.1.0"
+description = "A CLI tool for managing workspace brain - centralized knowledge and rules for multi-project workspaces"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "WorkspaceBrain Team" }
+]
+keywords = ["cli", "workspace", "brain", "knowledge-management", "rules"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+[project.scripts]
+workspacebrain = "workspacebrain.cli:app"
+wbrain = "workspacebrain.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/workspacebrain/workspacebrain"
+Repository = "https://github.com/workspacebrain/workspacebrain"
+Issues = "https://github.com/workspacebrain/workspacebrain/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/workspacebrain"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
