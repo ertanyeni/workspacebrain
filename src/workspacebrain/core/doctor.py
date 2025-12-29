@@ -10,7 +10,12 @@ from typing import Optional
 
 import yaml
 
-from workspacebrain.core.linker import AI_RULE_FILES, GENERATED_BANNER, BrainLinker
+from workspacebrain.core.linker import (
+    AI_RULE_FILES,
+    GENERATED_BANNER,
+    BrainLinker,
+    get_brain_link_type,
+)
 from workspacebrain.models import BrainConfig, ProjectInfo
 
 
@@ -365,29 +370,36 @@ class BrainDoctor:
         return health
 
     def _check_brain_link(self, project_path: Path) -> list[CheckResult]:
-        """Check .brain symlink or fallback in project."""
+        """Check .brain symlink or fallback in project.
+
+        Reports status as:
+        - "OK: symlink" - Valid symlink to brain
+        - "OK: pointer json" - Valid brain.link.json fallback
+        - "ERROR: broken link" - Symlink target doesn't exist
+        - "ERROR: missing json" - .brain dir exists but no brain.link.json
+        - "ERROR: brain bulunamadı" - brain_path in json doesn't exist
+        """
         results = []
-        brain_pointer = project_path / ".brain"
 
-        if brain_pointer.is_symlink():
-            # Check if symlink is valid
-            target = os.readlink(brain_pointer)
-            resolved = (project_path / target).resolve()
+        link_type, link_data = get_brain_link_type(project_path)
 
-            if resolved.exists():
+        if link_type == 'symlink':
+            if link_data and link_data.get('valid'):
                 results.append(
                     CheckResult(
-                        name=".brain symlink",
+                        name=".brain",
                         status=CheckStatus.OK,
-                        message=f"Valid ({target})",
+                        message=f"OK: symlink ({link_data['target']})",
                     )
                 )
             else:
+                target = link_data.get('target', 'unknown') if link_data else 'unknown'
+                resolved = link_data.get('resolved', 'unknown') if link_data else 'unknown'
                 results.append(
                     CheckResult(
-                        name=".brain symlink",
+                        name=".brain",
                         status=CheckStatus.ERROR,
-                        message="Broken symlink",
+                        message="ERROR: broken link",
                         details=[
                             f"Points to: {target}",
                             f"Resolved: {resolved} (not found)",
@@ -396,56 +408,64 @@ class BrainDoctor:
                     )
                 )
 
-        elif brain_pointer.is_dir():
-            # Check for fallback link file
-            link_file = brain_pointer / "brain.link.json"
-            if link_file.exists():
-                try:
-                    data = json.loads(link_file.read_text())
-                    brain_path = Path(data.get("brain_path", ""))
-
-                    if brain_path.exists():
-                        results.append(
-                            CheckResult(
-                                name=".brain fallback",
-                                status=CheckStatus.OK,
-                                message=f"Valid (brain.link.json)",
-                            )
-                        )
-                    else:
-                        results.append(
-                            CheckResult(
-                                name=".brain fallback",
-                                status=CheckStatus.ERROR,
-                                message="Brain path not found",
-                                details=[f"brain_path: {brain_path}"],
-                            )
-                        )
-                except (json.JSONDecodeError, KeyError):
-                    results.append(
-                        CheckResult(
-                            name=".brain fallback",
-                            status=CheckStatus.ERROR,
-                            message="Invalid brain.link.json",
-                        )
+        elif link_type == 'pointer':
+            if link_data and link_data.get('valid'):
+                brain_path = link_data.get('brain_path', 'unknown')
+                results.append(
+                    CheckResult(
+                        name=".brain",
+                        status=CheckStatus.OK,
+                        message=f"OK: pointer json",
+                        details=[f"brain_path: {brain_path}"],
                     )
+                )
+            elif link_data and link_data.get('error'):
+                results.append(
+                    CheckResult(
+                        name=".brain",
+                        status=CheckStatus.ERROR,
+                        message="ERROR: invalid json",
+                        details=[link_data.get('error', 'Parse error')],
+                    )
+                )
+            else:
+                brain_path = link_data.get('brain_path', 'unknown') if link_data else 'unknown'
+                results.append(
+                    CheckResult(
+                        name=".brain",
+                        status=CheckStatus.ERROR,
+                        message="ERROR: brain bulunamadı",
+                        details=[
+                            f"brain_path: {brain_path}",
+                            "Brain directory does not exist at specified path",
+                        ],
+                    )
+                )
+
+        else:  # 'none'
+            # Check if .brain exists as a directory without json
+            brain_pointer = project_path / ".brain"
+            if brain_pointer.is_dir():
+                results.append(
+                    CheckResult(
+                        name=".brain",
+                        status=CheckStatus.ERROR,
+                        message="ERROR: missing json",
+                        details=[
+                            ".brain directory exists but brain.link.json is missing",
+                            "Run 'workspacebrain link --force' to fix",
+                        ],
+                    )
+                )
             else:
                 results.append(
                     CheckResult(
                         name=".brain",
                         status=CheckStatus.WARNING,
-                        message="Directory exists but no brain.link.json",
+                        message="Not found",
+                        details=["Run 'workspacebrain link' to create"],
                     )
                 )
-        else:
-            results.append(
-                CheckResult(
-                    name=".brain link",
-                    status=CheckStatus.WARNING,
-                    message="Not found",
-                    details=["Run 'workspacebrain link' to create"],
-                )
-            )
 
         return results
 
