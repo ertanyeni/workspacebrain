@@ -5,12 +5,71 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import yaml
 
 from workspacebrain import __version__
 from workspacebrain.models import BrainConfig, BrainManifest
+
+
+def compute_relative_brain_path(project_path: Path, brain_path: Path) -> str:
+    """Compute relative path from project directory to brain directory.
+
+    This is a standalone function for testability.
+
+    Args:
+        project_path: Path to the project directory
+        brain_path: Path to the brain directory
+
+    Returns:
+        Relative path string (e.g., '../brain' or '../../brain')
+
+    Raises:
+        ValueError: If paths are on different drives (Windows)
+    """
+    try:
+        return os.path.relpath(brain_path, project_path)
+    except ValueError:
+        # Cross-device or other issues (e.g., Windows different drives)
+        raise ValueError(f"Cannot compute relative path between {project_path} and {brain_path}")
+
+
+def get_brain_link_type(project_path: Path) -> Tuple[str, Optional[dict]]:
+    """Check what type of brain link exists in a project.
+
+    Args:
+        project_path: Path to the project directory
+
+    Returns:
+        Tuple of (link_type, data) where:
+        - link_type: 'symlink', 'pointer', or 'none'
+        - data: For 'symlink': {'target': str, 'resolved': Path, 'valid': bool}
+                For 'pointer': The parsed brain.link.json content
+                For 'none': None
+    """
+    brain_pointer = project_path / ".brain"
+
+    if brain_pointer.is_symlink():
+        target = os.readlink(brain_pointer)
+        resolved = (project_path / target).resolve()
+        return ('symlink', {
+            'target': target,
+            'resolved': resolved,
+            'valid': resolved.exists()
+        })
+    elif brain_pointer.is_dir():
+        link_file = brain_pointer / "brain.link.json"
+        if link_file.exists():
+            try:
+                data = json.loads(link_file.read_text(encoding="utf-8"))
+                data['valid'] = Path(data.get('brain_path', '')).exists()
+                return ('pointer', data)
+            except (json.JSONDecodeError, KeyError):
+                return ('pointer', {'valid': False, 'error': 'Invalid JSON'})
+        return ('none', None)
+    else:
+        return ('none', None)
 
 
 # Generated file banner
@@ -127,7 +186,15 @@ class BrainLinker:
             result.skipped_projects.append(project_name)
 
     def _create_brain_link(self, project_path: Path, result: LinkResult) -> bool:
-        """Create .brain symlink, with fallback to .brain/brain.link.json."""
+        """Create .brain symlink, with fallback to .brain/brain.link.json.
+
+        Symlink/Pointer Contract:
+        - Primary: Create relative symlink .brain -> ../brain (or ../../brain etc.)
+        - Fallback: If symlink fails, create .brain/brain.link.json with:
+          - brain_path (absolute)
+          - brain_version
+          - created_at
+        """
         symlink_path = project_path / self.BRAIN_POINTER
         project_name = project_path.name
 
@@ -135,12 +202,11 @@ class BrainLinker:
         # e.g., if project is /workspace/backend-api and brain is /workspace/brain
         # relative path should be ../brain
         try:
-            # Get relative path from project dir to brain dir
-            relative_brain_path = os.path.relpath(
-                self.config.brain_path, project_path
+            relative_brain_path = compute_relative_brain_path(
+                project_path, self.config.brain_path
             )
         except ValueError:
-            # Cross-device or other issues, use absolute
+            # Cross-device or other issues, use absolute path
             relative_brain_path = str(self.config.brain_path)
 
         # Check if symlink already exists and points to correct location

@@ -91,7 +91,8 @@ class TestBrainDoctor:
             c for c in project_health.checks if ".brain" in c.name
         )
         assert symlink_check.status == CheckStatus.OK
-        assert "Valid" in symlink_check.message
+        # New format: "OK: symlink (../brain)" or "OK: pointer json"
+        assert "OK:" in symlink_check.message
 
     def test_diagnose_project_missing_link(
         self, temp_workspace: Path
@@ -218,7 +219,8 @@ class TestBrainDoctor:
         )
 
         assert symlink_check.status == CheckStatus.ERROR
-        assert "Broken" in symlink_check.message
+        # New format: "ERROR: broken link"
+        assert "broken" in symlink_check.message.lower()
 
     def test_diagnose_manual_file_not_flagged(
         self, temp_workspace: Path
