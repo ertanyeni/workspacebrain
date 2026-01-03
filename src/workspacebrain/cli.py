@@ -51,15 +51,11 @@ def main(
 @app.command()
 def init(
     workspace_path: Annotated[
-        Path,
+        Optional[Path],
         typer.Argument(
-            help="Path to the workspace directory.",
-            exists=True,
-            file_okay=False,
-            dir_okay=True,
-            resolve_path=True,
+            help="Path to the workspace directory. Defaults to current directory.",
         ),
-    ],
+    ] = None,
     force: Annotated[
         bool,
         typer.Option(
@@ -73,7 +69,19 @@ def init(
 
     Creates the brain/ folder structure with README.md, MANIFEST.yaml,
     DECISIONS.md, and subdirectories for CONTRACTS/, HANDOFFS/, and RULES/.
+
+    If no path is given, uses the current directory.
     """
+    # Use current directory if no path specified
+    if workspace_path is None:
+        workspace_path = Path.cwd()
+    else:
+        workspace_path = workspace_path.resolve()
+
+    if not workspace_path.exists():
+        console.print(f"[bold red]✗[/] Directory not found: {workspace_path}")
+        raise typer.Exit(code=1)
+
     config = BrainConfig(workspace_path=workspace_path, force=force)
     installer = BrainInstaller(config)
 
@@ -98,21 +106,29 @@ def init(
 @app.command()
 def scan(
     workspace_path: Annotated[
-        Path,
+        Optional[Path],
         typer.Argument(
-            help="Path to the workspace directory.",
-            exists=True,
-            file_okay=False,
-            dir_okay=True,
-            resolve_path=True,
+            help="Path to the workspace directory. Defaults to current directory.",
         ),
-    ],
+    ] = None,
 ) -> None:
     """Scan workspace for projects and update MANIFEST.yaml.
 
     Detects projects by looking for common project markers like
     package.json, pyproject.toml, Cargo.toml, etc.
+
+    If no path is given, uses the current directory.
     """
+    # Use current directory if no path specified
+    if workspace_path is None:
+        workspace_path = Path.cwd()
+    else:
+        workspace_path = workspace_path.resolve()
+
+    if not workspace_path.exists():
+        console.print(f"[bold red]✗[/] Directory not found: {workspace_path}")
+        raise typer.Exit(code=1)
+
     config = BrainConfig(workspace_path=workspace_path)
     scanner = WorkspaceScanner(config)
 
@@ -151,15 +167,11 @@ def scan(
 @app.command()
 def link(
     workspace_path: Annotated[
-        Path,
+        Optional[Path],
         typer.Argument(
-            help="Path to the workspace directory.",
-            exists=True,
-            file_okay=False,
-            dir_okay=True,
-            resolve_path=True,
+            help="Path to the workspace directory. Defaults to current directory.",
         ),
-    ],
+    ] = None,
     force: Annotated[
         bool,
         typer.Option(
@@ -173,7 +185,19 @@ def link(
 
     Creates .brain symlink in each detected project pointing to the brain.
     Also generates AI rule files: CLAUDE.md, CURSOR_RULES.md, AI.md
+
+    If no path is given, uses the current directory.
     """
+    # Use current directory if no path specified
+    if workspace_path is None:
+        workspace_path = Path.cwd()
+    else:
+        workspace_path = workspace_path.resolve()
+
+    if not workspace_path.exists():
+        console.print(f"[bold red]✗[/] Directory not found: {workspace_path}")
+        raise typer.Exit(code=1)
+
     config = BrainConfig(workspace_path=workspace_path, force=force)
     linker = BrainLinker(config)
 
@@ -206,17 +230,107 @@ def link(
 
 
 @app.command()
+def setup(
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Argument(
+            help="Path to the workspace directory. Defaults to current directory.",
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Force re-initialization and re-linking.",
+        ),
+    ] = False,
+) -> None:
+    """One-command setup: init + scan + link.
+
+    Initializes brain, scans for projects, and links them all in one go.
+    This is the quickest way to get started with WorkspaceBrain.
+
+    If no path is given, uses the current directory.
+    """
+    # Use current directory if no path specified
+    if workspace_path is None:
+        workspace_path = Path.cwd()
+    else:
+        workspace_path = workspace_path.resolve()
+
+    if not workspace_path.exists():
+        console.print(f"[bold red]✗[/] Directory not found: {workspace_path}")
+        raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path, force=force)
+
+    # Step 1: Init
+    console.print(f"\n[bold blue]Step 1/3:[/] Initializing brain in [cyan]{workspace_path}[/]")
+    installer = BrainInstaller(config)
+    with console.status("[bold green]Initializing..."):
+        init_result = installer.install()
+
+    if not init_result.success:
+        console.print(f"[bold red]✗[/] Init failed: {init_result.error}")
+        raise typer.Exit(code=1)
+    console.print(f"[green]✓[/] Brain initialized at [cyan]{config.brain_path}[/]")
+
+    # Step 2: Scan
+    console.print(f"\n[bold blue]Step 2/3:[/] Scanning for projects...")
+    scanner = WorkspaceScanner(config)
+    with console.status("[bold green]Scanning..."):
+        scan_result = scanner.scan()
+
+    if not scan_result.success:
+        console.print(f"[bold red]✗[/] Scan failed: {scan_result.error}")
+        raise typer.Exit(code=1)
+    console.print(f"[green]✓[/] Found [bold]{len(scan_result.projects)}[/] project(s)")
+
+    if scan_result.projects:
+        for project in scan_result.projects:
+            conf_pct = int(project.confidence * 100)
+            console.print(f"    [dim]•[/] {project.name} [cyan]({project.project_type})[/] {conf_pct}%")
+
+    # Step 3: Link
+    console.print(f"\n[bold blue]Step 3/3:[/] Linking projects to brain...")
+    linker = BrainLinker(config)
+    with console.status("[bold green]Linking..."):
+        link_result = linker.link_all()
+
+    if not link_result.success:
+        console.print(f"[bold red]✗[/] Link failed: {link_result.error}")
+        raise typer.Exit(code=1)
+
+    if link_result.linked_projects:
+        console.print(f"[green]✓[/] Linked [bold]{len(link_result.linked_projects)}[/] project(s)")
+        for project in link_result.linked_projects:
+            if project in link_result.symlink_fallbacks:
+                console.print(f"    [dim]•[/] {project} [yellow](pointer)[/]")
+            else:
+                console.print(f"    [dim]•[/] {project} [green](symlink)[/]")
+
+    # Final summary
+    console.print()
+    console.print(
+        f"[bold green]✓ Setup complete![/] "
+        f"Brain ready at [cyan]{config.brain_path}[/]"
+    )
+    console.print()
+    console.print("[dim]Next steps:[/]")
+    console.print("  • Run [cyan]wbrain doctor[/] to verify everything is healthy")
+    console.print("  • Edit [cyan]brain/RULES/[/] to customize AI instructions")
+    console.print("  • Add decisions to [cyan]brain/DECISIONS.md[/]")
+
+
+@app.command()
 def doctor(
     workspace_path: Annotated[
-        Path,
+        Optional[Path],
         typer.Argument(
-            help="Path to the workspace directory.",
-            exists=True,
-            file_okay=False,
-            dir_okay=True,
-            resolve_path=True,
+            help="Path to the workspace directory. Defaults to current directory.",
         ),
-    ],
+    ] = None,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -230,7 +344,19 @@ def doctor(
 
     Verifies brain structure, validates MANIFEST.yaml,
     checks project links, detects drift in generated files.
+
+    If no path is given, uses the current directory.
     """
+    # Use current directory if no path specified
+    if workspace_path is None:
+        workspace_path = Path.cwd()
+    else:
+        workspace_path = workspace_path.resolve()
+
+    if not workspace_path.exists():
+        console.print(f"[bold red]✗[/] Directory not found: {workspace_path}")
+        raise typer.Exit(code=1)
+
     config = BrainConfig(workspace_path=workspace_path)
     doctor_checker = BrainDoctor(config)
 
