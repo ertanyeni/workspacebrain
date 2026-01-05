@@ -140,19 +140,9 @@ def scan(
         if result.projects:
             console.print(f"\n[bold]Found {len(result.projects)} project(s):[/]\n")
             for project in result.projects:
-                # Confidence color based on value
-                if project.confidence >= 0.8:
-                    conf_color = "green"
-                elif project.confidence >= 0.5:
-                    conf_color = "yellow"
-                else:
-                    conf_color = "red"
-
-                conf_pct = int(project.confidence * 100)
                 console.print(
                     f"  [bold]{project.name}[/] "
-                    f"[cyan]({project.project_type})[/] "
-                    f"[{conf_color}]{conf_pct}%[/]"
+                    f"[cyan]({project.project_type})[/]"
                 )
                 console.print(f"    [dim]path:[/] {project.path}")
                 console.print(f"    [dim]signals:[/] {', '.join(project.signals)}")
@@ -289,8 +279,7 @@ def setup(
 
     if scan_result.projects:
         for project in scan_result.projects:
-            conf_pct = int(project.confidence * 100)
-            console.print(f"    [dim]•[/] {project.name} [cyan]({project.project_type})[/] {conf_pct}%")
+            console.print(f"    [dim]•[/] {project.name} [cyan]({project.project_type})[/]")
 
     # Step 3: Link
     console.print(f"\n[bold blue]Step 3/3:[/] Linking projects to brain...")

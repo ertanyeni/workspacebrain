@@ -7,7 +7,7 @@ import pytest
 
 from workspacebrain.core.doctor import BrainDoctor, CheckStatus
 from workspacebrain.core.installer import BrainInstaller
-from workspacebrain.core.linker import BrainLinker
+from workspacebrain.core.linker import AI_RULES_DIR, BrainLinker
 from workspacebrain.core.scanner import WorkspaceScanner
 from workspacebrain.models import BrainConfig
 
@@ -142,8 +142,9 @@ class TestBrainDoctor:
         linker = BrainLinker(config)
         linker.link_all()
 
-        # Modify a generated file to cause drift
-        claude_md = project / "CLAUDE.md"
+        # Modify a generated file to cause drift (in .wbrain/ directory)
+        wbrain_dir = project / AI_RULES_DIR
+        claude_md = wbrain_dir / "CLAUDE.md"
         content = claude_md.read_text()
         claude_md.write_text(content + "\n# Modified by hand\n")
 
@@ -153,9 +154,9 @@ class TestBrainDoctor:
 
         project_health = report.project_health[0]
 
-        # Find CLAUDE.md check
+        # Find CLAUDE.md check (name includes directory prefix)
         claude_check = next(
-            c for c in project_health.checks if c.name == "CLAUDE.md"
+            c for c in project_health.checks if "CLAUDE.md" in c.name
         )
         assert claude_check.status == CheckStatus.WARNING
         assert "Drift" in claude_check.message
@@ -185,9 +186,10 @@ class TestBrainDoctor:
 
         project_health = report.project_health[0]
 
-        # All AI rule files should be in sync
+        # All AI rule files should be in sync (names include .wbrain/ prefix)
+        ai_rule_names = [".wbrain/CLAUDE.md", ".wbrain/CURSOR_RULES.md", ".wbrain/AI.md"]
         for check in project_health.checks:
-            if check.name in ["CLAUDE.md", "CURSOR_RULES.md", "AI.md"]:
+            if check.name in ai_rule_names:
                 assert check.status == CheckStatus.OK
                 assert "In sync" in check.message
 
@@ -237,15 +239,17 @@ class TestBrainDoctor:
         scanner = WorkspaceScanner(config)
         scanner.scan()
 
-        # Create manual CLAUDE.md without our banner
-        (project / "CLAUDE.md").write_text("# My custom instructions\n")
+        # Create manual CLAUDE.md without our banner (in .wbrain/ directory)
+        wbrain_dir = project / AI_RULES_DIR
+        wbrain_dir.mkdir(exist_ok=True)
+        (wbrain_dir / "CLAUDE.md").write_text("# My custom instructions\n")
 
         doctor = BrainDoctor(config)
         report = doctor.diagnose()
 
         project_health = report.project_health[0]
         claude_check = next(
-            c for c in project_health.checks if c.name == "CLAUDE.md"
+            c for c in project_health.checks if "CLAUDE.md" in c.name
         )
 
         assert claude_check.status == CheckStatus.OK
