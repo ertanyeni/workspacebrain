@@ -23,7 +23,6 @@ from workspacebrain.core.linker import (
     compute_relative_brain_path,
     get_brain_link_type,
     AI_RULE_FILES,
-    AI_RULES_DIR,
     GENERATED_BANNER,
 )
 from workspacebrain.core.doctor import BrainDoctor, CheckStatus
@@ -484,7 +483,7 @@ class TestGeneratedRulesFiles:
     """Test that AI rule files are generated correctly."""
 
     def test_rule_files_created(self, workspace_with_api_web: Path):
-        """Link should create CLAUDE.md, CURSOR_RULES.md, AI.md in .wbrain/ of each project."""
+        """Link should create AI rule files in project root."""
         config = BrainConfig(workspace_path=workspace_with_api_web)
 
         BrainInstaller(config).install()
@@ -493,14 +492,11 @@ class TestGeneratedRulesFiles:
 
         for project in ["backend-api", "frontend-web"]:
             project_path = workspace_with_api_web / project
-            wbrain_dir = project_path / AI_RULES_DIR
 
-            # .wbrain directory should exist
-            assert wbrain_dir.exists(), f"{AI_RULES_DIR}/ not created in {project}/"
-
+            # AI rule files should be in project root
             for rule_file in AI_RULE_FILES:
-                file_path = wbrain_dir / rule_file
-                assert file_path.exists(), f"{AI_RULES_DIR}/{rule_file} not created in {project}/"
+                file_path = project_path / rule_file
+                assert file_path.exists(), f"{rule_file} not created in {project}/"
 
     def test_rule_files_have_generated_header(self, workspace_with_api_web: Path):
         """Generated rule files should have DO NOT EDIT header."""
@@ -512,10 +508,9 @@ class TestGeneratedRulesFiles:
 
         for project in ["backend-api", "frontend-web"]:
             project_path = workspace_with_api_web / project
-            wbrain_dir = project_path / AI_RULES_DIR
 
             for rule_file in AI_RULE_FILES:
-                file_path = wbrain_dir / rule_file
+                file_path = project_path / rule_file
                 content = file_path.read_text()
 
                 # Check for generated banner
@@ -530,8 +525,8 @@ class TestGeneratedRulesFiles:
         WorkspaceScanner(config).scan()
         BrainLinker(config).link_all()
 
-        # Check API project (python-be) - files are in .wbrain/ directory
-        api_claude = workspace_with_api_web / "backend-api" / AI_RULES_DIR / "CLAUDE.md"
+        # Check API project (python-be) - files are in project root
+        api_claude = workspace_with_api_web / "backend-api" / "CLAUDE.md"
         content = api_claude.read_text()
         # Should contain project type somewhere in the content
         assert "python" in content.lower() or "backend" in content.lower()
@@ -544,8 +539,8 @@ class TestGeneratedRulesFiles:
         WorkspaceScanner(config).scan()
         BrainLinker(config).link_all()
 
-        # Files are in .wbrain/ directory
-        api_claude = workspace_with_api_web / "backend-api" / AI_RULES_DIR / "CLAUDE.md"
+        # Files are in project root
+        api_claude = workspace_with_api_web / "backend-api" / "CLAUDE.md"
         content = api_claude.read_text()
 
         # Should reference brain directory or key files
@@ -565,8 +560,8 @@ class TestGeneratedRulesFiles:
         WorkspaceScanner(config).scan()
         BrainLinker(config).link_all()
 
-        # Check that custom template was used - files are in .wbrain/ directory
-        api_claude = workspace_with_api_web / "backend-api" / AI_RULES_DIR / "CLAUDE.md"
+        # Check that custom template was used - files are in project root
+        api_claude = workspace_with_api_web / "backend-api" / "CLAUDE.md"
         content = api_claude.read_text()
 
         assert "Custom Claude Rules" in content
@@ -614,10 +609,9 @@ class TestFullWorkflow:
 
         for project in ["backend-api", "frontend-web"]:
             project_path = workspace_with_api_web / project
-            wbrain_dir = project_path / AI_RULES_DIR
             assert (project_path / ".brain").exists() or (project_path / ".brain").is_symlink()
-            # AI rule files should be in .wbrain/ directory
-            assert wbrain_dir.exists()
-            assert (wbrain_dir / "CLAUDE.md").exists()
-            assert (wbrain_dir / "CURSOR_RULES.md").exists()
-            assert (wbrain_dir / "AI.md").exists()
+            # AI rule files should be in project root
+            assert (project_path / "CLAUDE.md").exists()
+            assert (project_path / ".cursorrules").exists()
+            assert (project_path / ".windsurfrules").exists()
+            assert (project_path / "AI.md").exists()

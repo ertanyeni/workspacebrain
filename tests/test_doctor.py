@@ -7,7 +7,7 @@ import pytest
 
 from workspacebrain.core.doctor import BrainDoctor, CheckStatus
 from workspacebrain.core.installer import BrainInstaller
-from workspacebrain.core.linker import AI_RULES_DIR, BrainLinker
+from workspacebrain.core.linker import AI_RULE_FILES, BrainLinker
 from workspacebrain.core.scanner import WorkspaceScanner
 from workspacebrain.models import BrainConfig
 
@@ -142,9 +142,8 @@ class TestBrainDoctor:
         linker = BrainLinker(config)
         linker.link_all()
 
-        # Modify a generated file to cause drift (in .wbrain/ directory)
-        wbrain_dir = project / AI_RULES_DIR
-        claude_md = wbrain_dir / "CLAUDE.md"
+        # Modify a generated file to cause drift (in project root)
+        claude_md = project / "CLAUDE.md"
         content = claude_md.read_text()
         claude_md.write_text(content + "\n# Modified by hand\n")
 
@@ -186,10 +185,9 @@ class TestBrainDoctor:
 
         project_health = report.project_health[0]
 
-        # All AI rule files should be in sync (names include .wbrain/ prefix)
-        ai_rule_names = [".wbrain/CLAUDE.md", ".wbrain/CURSOR_RULES.md", ".wbrain/AI.md"]
+        # All AI rule files should be in sync (names are file names in project root)
         for check in project_health.checks:
-            if check.name in ai_rule_names:
+            if check.name in AI_RULE_FILES:
                 assert check.status == CheckStatus.OK
                 assert "In sync" in check.message
 
@@ -239,10 +237,8 @@ class TestBrainDoctor:
         scanner = WorkspaceScanner(config)
         scanner.scan()
 
-        # Create manual CLAUDE.md without our banner (in .wbrain/ directory)
-        wbrain_dir = project / AI_RULES_DIR
-        wbrain_dir.mkdir(exist_ok=True)
-        (wbrain_dir / "CLAUDE.md").write_text("# My custom instructions\n")
+        # Create manual CLAUDE.md without our banner (in project root)
+        (project / "CLAUDE.md").write_text("# My custom instructions\n")
 
         doctor = BrainDoctor(config)
         report = doctor.diagnose()

@@ -12,7 +12,7 @@ from rich.table import Table
 
 from workspacebrain.core.doctor import BrainDoctor, CheckStatus
 from workspacebrain.core.installer import BrainInstaller
-from workspacebrain.core.linker import BrainLinker
+from workspacebrain.core.linker import AI_RULE_FILES, BrainLinker, unlink_project
 from workspacebrain.core.scanner import WorkspaceScanner
 from workspacebrain.models import BrainConfig
 
@@ -444,6 +444,313 @@ def _get_status_icon(status: CheckStatus) -> str:
         CheckStatus.SKIPPED: "[dim]-[/]",
     }
     return icons.get(status, "[dim]?[/]")
+
+
+@app.command()
+def log(
+    message: Annotated[
+        str,
+        typer.Argument(help="Log message to record."),
+    ],
+    project: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project",
+            "-p",
+            help="Project name (auto-detected from current directory if not specified).",
+        ),
+    ] = None,
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path (searches parent directories if not specified).",
+        ),
+    ] = None,
+) -> None:
+    """Add a log entry to the brain's daily log.
+
+    Logs are stored in brain/LOGS/YYYY-MM-DD.md files.
+    Useful for tracking work progress across projects.
+
+    Examples:
+        wbrain log "Added user authentication"
+        wbrain log "Fixed API bug" -p backend
+        wbrain log "Refactored components" --project frontend
+    """
+    from datetime import datetime
+
+    # Find workspace by looking for brain/ directory
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found. Run 'wbrain init' first or specify --workspace.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+
+    if not config.brain_path.exists():
+        console.print(f"[bold red]✗[/] Brain not found at {config.brain_path}")
+        raise typer.Exit(code=1)
+
+    # Auto-detect project from current directory
+    if project is None:
+        cwd = Path.cwd()
+        # Check if cwd is inside workspace
+        try:
+            rel_path = cwd.relative_to(workspace_path)
+            # Get first directory component as project name
+            parts = rel_path.parts
+            if parts and parts[0] != "brain":
+                project = parts[0]
+        except ValueError:
+            pass  # cwd is not inside workspace
+
+    # Create LOGS directory if needed
+    logs_path = config.brain_path / "LOGS"
+    logs_path.mkdir(exist_ok=True)
+
+    # Get today's log file
+    today = datetime.now()
+    log_file = logs_path / f"{today.strftime('%Y-%m-%d')}.md"
+
+    # Create or append to log file
+    timestamp = today.strftime("%H:%M")
+    project_tag = f"[{project}]" if project else "[general]"
+
+    if not log_file.exists():
+        # Create new daily log with header
+        header = f"# Work Log - {today.strftime('%Y-%m-%d')}\n\n"
+        log_file.write_text(header, encoding="utf-8")
+
+    # Append log entry
+    entry = f"- **{timestamp}** {project_tag} {message}\n"
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(entry)
+
+    console.print(f"[green]✓[/] Logged: {project_tag} {message}")
+    console.print(f"  [dim]→ {log_file.relative_to(workspace_path)}[/]")
+
+
+@app.command()
+def logs(
+    days: Annotated[
+        int,
+        typer.Option(
+            "--days",
+            "-d",
+            help="Number of days to show.",
+        ),
+    ] = 7,
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path.",
+        ),
+    ] = None,
+) -> None:
+    """Show recent work logs.
+
+    Displays log entries from the last N days.
+    """
+    from datetime import datetime, timedelta
+
+    # Find workspace
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+    logs_path = config.brain_path / "LOGS"
+
+    if not logs_path.exists():
+        console.print("[dim]No logs yet. Use 'wbrain log \"message\"' to start logging.[/]")
+        return
+
+    # Get log files from last N days
+    today = datetime.now()
+    found_logs = False
+
+    for i in range(days):
+        date = today - timedelta(days=i)
+        log_file = logs_path / f"{date.strftime('%Y-%m-%d')}.md"
+
+        if log_file.exists():
+            found_logs = True
+            content = log_file.read_text(encoding="utf-8")
+            console.print(content)
+            console.print()
+
+    if not found_logs:
+        console.print(f"[dim]No logs in the last {days} days.[/]")
+
+
+def _find_workspace_with_brain(start_path: Path) -> Optional[Path]:
+    """Find workspace by searching for brain/ directory in current and parent directories."""
+    current = start_path.resolve()
+
+    # Check current and parent directories
+    for _ in range(10):  # Max 10 levels up
+        brain_path = current / "brain"
+        if brain_path.exists() and brain_path.is_dir():
+            # Verify it's our brain (has MANIFEST.yaml)
+            if (brain_path / "MANIFEST.yaml").exists():
+                return current
+
+        parent = current.parent
+        if parent == current:  # Reached root
+            break
+        current = parent
+
+    return None
+
+
+@app.command()
+def uninstall(
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Argument(
+            help="Path to the workspace directory. Defaults to current directory.",
+        ),
+    ] = None,
+    keep_brain: Annotated[
+        bool,
+        typer.Option(
+            "--keep-brain",
+            help="Keep the brain/ directory (only remove project links and AI files).",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Skip confirmation prompt.",
+        ),
+    ] = False,
+) -> None:
+    """Uninstall WorkspaceBrain from workspace.
+
+    Removes all generated files:
+    - .brain symlinks from all projects
+    - AI rule files (CLAUDE.md, .cursorrules, .windsurfrules, AI.md)
+    - brain/ directory (unless --keep-brain is specified)
+
+    After running this command, run 'pipx uninstall workspacebrain'
+    to remove the CLI tool itself.
+    """
+    import shutil
+    import yaml
+
+    # Use current directory if no path specified
+    if workspace_path is None:
+        workspace_path = Path.cwd()
+    else:
+        workspace_path = workspace_path.resolve()
+
+    if not workspace_path.exists():
+        console.print(f"[bold red]✗[/] Directory not found: {workspace_path}")
+        raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+
+    if not config.brain_path.exists():
+        console.print(f"[bold red]✗[/] No brain found at {config.brain_path}")
+        console.print("[dim]Nothing to uninstall.[/]")
+        raise typer.Exit(code=1)
+
+    # Load projects from manifest
+    projects = []
+    if config.manifest_path.exists():
+        try:
+            content = config.manifest_path.read_text(encoding="utf-8")
+            data = yaml.safe_load(content)
+            if data and "detected_projects" in data:
+                projects = [p["path"] for p in data["detected_projects"]]
+        except Exception:
+            pass
+
+    # Show what will be removed
+    console.print()
+    console.print(
+        Panel.fit(
+            f"[bold]Uninstall WorkspaceBrain[/]\n[dim]{workspace_path}[/]",
+            border_style="yellow",
+        )
+    )
+    console.print()
+
+    console.print("[bold]The following will be removed:[/]")
+    console.print()
+
+    # List project files that will be removed
+    files_to_remove = []
+    for project_path_str in projects:
+        project_path = Path(project_path_str)
+        if project_path.exists():
+            # Check for .brain symlink
+            brain_link = project_path / ".brain"
+            if brain_link.exists() or brain_link.is_symlink():
+                files_to_remove.append(str(brain_link))
+
+            # Check for AI rule files
+            for rule_file in AI_RULE_FILES:
+                rule_path = project_path / rule_file
+                if rule_path.exists():
+                    files_to_remove.append(str(rule_path))
+
+    if files_to_remove:
+        console.print("[cyan]Project files:[/]")
+        for f in files_to_remove[:10]:  # Show first 10
+            console.print(f"  • {f}")
+        if len(files_to_remove) > 10:
+            console.print(f"  [dim]... and {len(files_to_remove) - 10} more files[/]")
+        console.print()
+
+    if not keep_brain:
+        console.print(f"[cyan]Brain directory:[/]")
+        console.print(f"  • {config.brain_path}")
+        console.print()
+
+    # Confirm
+    if not force:
+        confirm = typer.confirm("Are you sure you want to proceed?", default=False)
+        if not confirm:
+            console.print("[dim]Aborted.[/]")
+            raise typer.Exit(code=0)
+
+    console.print()
+
+    # Remove project links and files
+    removed_count = 0
+    for project_path_str in projects:
+        project_path = Path(project_path_str)
+        if project_path.exists():
+            if unlink_project(project_path):
+                removed_count += 1
+                console.print(f"[green]✓[/] Cleaned: {project_path.name}")
+
+    # Remove brain directory
+    if not keep_brain and config.brain_path.exists():
+        shutil.rmtree(config.brain_path)
+        console.print(f"[green]✓[/] Removed: {config.brain_path}")
+
+    console.print()
+    console.print(
+        Panel.fit(
+            f"[bold green]Uninstall complete![/]\n\n"
+            f"Cleaned {removed_count} project(s)\n"
+            f"{'Brain directory preserved' if keep_brain else 'Brain directory removed'}\n\n"
+            "[dim]To remove the CLI tool:[/]\n"
+            "[cyan]pipx uninstall workspacebrain[/]",
+            border_style="green",
+        )
+    )
 
 
 if __name__ == "__main__":
