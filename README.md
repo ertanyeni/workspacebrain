@@ -1,15 +1,16 @@
 # WorkspaceBrain
 
-A CLI tool for managing multiple projects from a single place. Creates a central "brain" across your projects and automatically adds rule files for AI assistants (Claude, Cursor, etc.).
+A CLI tool for managing multiple projects from a single place. Creates a central "brain" across your projects and automatically adds rule files for AI assistants (Claude, Cursor, Windsurf, etc.).
 
 ## What Does It Do?
 
 If you have multiple projects in a workspace (frontend, backend, mobile, etc.), WorkspaceBrain:
 
-1. **Creates a central `brain/` folder** - all decisions, rules, and contracts in one place
+1. **Creates a central `brain/` folder** - all decisions, rules, contracts, and logs in one place
 2. **Auto-detects projects** - recognizes Python, Node.js, Rust, Go, Java projects
-3. **Adds AI rule files to each project** - for Claude, Cursor, and other AI assistants
+3. **Adds AI rule files to each project** - for Claude, Cursor, Windsurf, and other AI assistants
 4. **Links projects together** - each project connects to the central brain via symlink
+5. **Tracks work history** - daily logs for progress tracking
 
 ## Installation
 
@@ -35,7 +36,7 @@ This command:
 
 1. Creates the `brain/` folder
 2. Scans and detects all projects
-3. Adds `.brain` symlink and `.wbrain/` folder to each project
+3. Adds `.brain` symlink and AI rule files to each project
 
 ## Commands
 
@@ -46,6 +47,9 @@ This command:
 | `wbrain scan` | Detects projects |
 | `wbrain link` | Links projects to brain |
 | `wbrain doctor` | Health check |
+| `wbrain log "msg"` | Add work log entry |
+| `wbrain logs` | Show recent work logs |
+| `wbrain uninstall` | Remove all generated files |
 
 All commands work in the current directory. You can also specify a path:
 
@@ -63,24 +67,60 @@ workspace/
 │   ├── DECISIONS.md            # Architectural decisions
 │   ├── CONTRACTS/              # API contracts
 │   ├── HANDOFFS/               # Work transitions
-│   └── RULES/                  # Coding standards
+│   ├── RULES/                  # Coding standards
+│   └── LOGS/                   # Daily work logs
+│       └── 2025-01-05.md
 │
 ├── frontend/
-│   ├── .brain -> ../brain      # Symlink (to central brain)
-│   ├── .wbrain/                # AI rule files
-│   │   ├── CLAUDE.md
-│   │   ├── CURSOR_RULES.md
-│   │   └── AI.md
+│   ├── .brain -> ../brain      # Symlink to central brain
+│   ├── CLAUDE.md               # Claude Code instructions
+│   ├── .cursorrules            # Cursor IDE rules
+│   ├── .windsurfrules          # Windsurf rules
+│   ├── AI.md                   # Generic AI instructions
 │   └── ... (project files)
 │
 └── backend/
     ├── .brain -> ../brain
-    ├── .wbrain/
-    │   ├── CLAUDE.md
-    │   ├── CURSOR_RULES.md
-    │   └── AI.md
+    ├── CLAUDE.md
+    ├── .cursorrules
+    ├── .windsurfrules
+    ├── AI.md
     └── ... (project files)
 ```
+
+## AI Rule Files
+
+Files created in the **project root** for each AI tool to auto-detect:
+
+| File | AI Tool | Auto-Read |
+|------|---------|-----------|
+| `CLAUDE.md` | Claude Code | Yes |
+| `.cursorrules` | Cursor IDE | Yes |
+| `.windsurfrules` | Windsurf/Codeium | Yes |
+| `AI.md` | Generic | Manual |
+
+These files are auto-generated and can be customized from the central `brain/RULES/` folder.
+
+## Work Logging
+
+Track your work progress with simple log commands:
+
+```bash
+# Log from inside a project (auto-detects project name)
+cd frontend
+wbrain log "Added user authentication"
+
+# Log with explicit project name
+wbrain log "Fixed API bug" -p backend
+
+# View recent logs
+wbrain logs
+
+# View last 30 days
+wbrain logs -d 30
+```
+
+Logs are stored in `brain/LOGS/YYYY-MM-DD.md` files.
 
 ## Supported Project Types
 
@@ -92,16 +132,6 @@ workspace/
 | **Go** | `go.mod` |
 | **Java** | `pom.xml`, `build.gradle` |
 | **Mobile** | `app.json` (Expo), React Native |
-
-## AI Rule Files
-
-Files created in the `.wbrain/` folder of each project:
-
-- **CLAUDE.md** - Project context and rules for Claude AI
-- **CURSOR_RULES.md** - Rules for Cursor IDE
-- **AI.md** - General guide for AI assistants
-
-These files are auto-generated and can be customized from the central `brain/RULES/` folder.
 
 ## Example Usage
 
@@ -115,10 +145,29 @@ wbrain setup
 # 3. Health check
 wbrain doctor
 
-# 4. If new projects are added, scan and link again
+# 4. Log your work
+wbrain log "Initial setup complete"
+
+# 5. If new projects are added, scan and link again
 wbrain scan
 wbrain link
 ```
+
+## Uninstall
+
+To completely remove WorkspaceBrain:
+
+```bash
+# Remove all generated files from workspace
+wbrain uninstall
+
+# Then remove the CLI tool
+pipx uninstall workspacebrain
+```
+
+Options:
+- `--keep-brain` - Keep the brain/ directory, only remove project files
+- `--force` - Skip confirmation prompt
 
 ## Health Check
 
@@ -129,28 +178,30 @@ wbrain doctor
 Output:
 
 ```text
-╭─────────────────────────────╮
-│ Brain Health Check          │
-╰─────────────────────────────╯
+╭───────────────────────────────╮
+│ Brain Health Check            │
+│ /Users/you/Documents/GitHub   │
+╰───────────────────────────────╯
 
-Brain Directory
-┏━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Check           ┃ Status ┃ Details              ┃
-┡━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━┩
-│ Brain Directory │   ✓    │ Found                │
-│ MANIFEST.yaml   │   ✓    │ Valid (3 projects)   │
-│ README.md       │   ✓    │ Present              │
-└─────────────────┴────────┴──────────────────────┘
+                Brain Directory
+┏━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┓
+┃ Check           ┃ Status ┃ Details           ┃
+┡━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
+│ Brain Directory │   ✓    │ Found             │
+│ MANIFEST.yaml   │   ✓    │ Valid (3 projects)│
+│ README.md       │   ✓    │ Present           │
+└─────────────────┴────────┴───────────────────┘
 
-frontend (node-fe)
-┏━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Check                   ┃ Status ┃ Details                ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ .brain                  │   ✓    │ OK: symlink (../brain) │
-│ .wbrain/CLAUDE.md       │   ✓    │ In sync                │
-│ .wbrain/CURSOR_RULES.md │   ✓    │ In sync                │
-│ .wbrain/AI.md           │   ✓    │ In sync                │
-└─────────────────────────┴────────┴────────────────────────┘
+              frontend (node-fe)
+┏━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Check          ┃ Status ┃ Details                ┃
+┡━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ .brain         │   ✓    │ OK: symlink (../brain) │
+│ CLAUDE.md      │   ✓    │ In sync (claude)       │
+│ .cursorrules   │   ✓    │ In sync (cursor)       │
+│ .windsurfrules │   ✓    │ In sync (windsurf)     │
+│ AI.md          │   ✓    │ In sync (generic)      │
+└────────────────┴────────┴────────────────────────┘
 
 ╭──────────────────────────────────────╮
 │ All checks passed! Brain is healthy. │

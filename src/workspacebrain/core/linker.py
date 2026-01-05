@@ -82,11 +82,17 @@ GENERATED_BANNER = """# ========================================================
 
 """
 
-# AI rule files to generate in each project
-AI_RULE_FILES = ["CLAUDE.md", "CURSOR_RULES.md", "AI.md"]
+# AI rule files to generate in each project (placed in project root)
+# Each AI tool has its own expected file name:
+AI_RULE_FILES = {
+    "CLAUDE.md": "claude",        # Claude Code
+    ".cursorrules": "cursor",      # Cursor IDE
+    ".windsurfrules": "windsurf",  # Windsurf/Codeium
+    "AI.md": "generic",            # Generic AI instructions
+}
 
-# Directory name for AI rules in each project
-AI_RULES_DIR = ".wbrain"
+# Legacy directory name (for cleanup of old installations)
+AI_RULES_DIR_LEGACY = ".wbrain"
 
 
 @dataclass
@@ -276,11 +282,7 @@ class BrainLinker:
     def _generate_ai_rule_files(
         self, project_path: Path, project_type: str, result: LinkResult
     ) -> None:
-        """Generate AI rule files (CLAUDE.md, CURSOR_RULES.md, AI.md) in .wbrain/ directory."""
-        # Create .wbrain directory if it doesn't exist
-        wbrain_dir = project_path / AI_RULES_DIR
-        wbrain_dir.mkdir(exist_ok=True)
-
+        """Generate AI rule files in project root for each AI tool to read."""
         for rule_file in AI_RULE_FILES:
             self._generate_rule_file(project_path, project_type, rule_file, result)
 
@@ -291,8 +293,8 @@ class BrainLinker:
         rule_file: str,
         result: LinkResult,
     ) -> None:
-        """Generate a single AI rule file from brain/RULES/ template into .wbrain/ directory."""
-        output_path = project_path / AI_RULES_DIR / rule_file
+        """Generate a single AI rule file in project root."""
+        output_path = project_path / rule_file
 
         # Skip if exists and not forcing
         if output_path.exists() and not self.config.force:
@@ -305,7 +307,7 @@ class BrainLinker:
         content = GENERATED_BANNER + template_content
         output_path.write_text(content, encoding="utf-8")
 
-        result.generated_files.append(f"{project_path.name}/{AI_RULES_DIR}/{rule_file}")
+        result.generated_files.append(f"{project_path.name}/{rule_file}")
 
     def _load_rule_template(self, rule_file: str, project_type: str) -> str:
         """Load rule template from brain/RULES/ directory.
@@ -318,13 +320,18 @@ class BrainLinker:
         """
         rules_path = self.config.rules_path
 
+        # Get base name for template lookup (remove leading dot for dotfiles)
+        base_name = rule_file.lstrip(".")
+        if not base_name.endswith(".md"):
+            base_name = base_name + ".md"
+
         # Try type-specific template
-        type_specific = rules_path / f"{rule_file.replace('.md', '')}.{project_type}.md"
+        type_specific = rules_path / f"{base_name.replace('.md', '')}.{project_type}.md"
         if type_specific.exists():
             return type_specific.read_text(encoding="utf-8")
 
         # Try generic template
-        generic = rules_path / rule_file
+        generic = rules_path / base_name
         if generic.exists():
             return generic.read_text(encoding="utf-8")
 
@@ -336,21 +343,25 @@ class BrainLinker:
         workspace_name = self.config.workspace_path.name
         brain_path = self.config.brain_path
 
+        # Common brain reference section
+        brain_section = f"""## Workspace Brain
+
+This project is part of the **{workspace_name}** workspace.
+Central brain directory: `.brain` -> `{brain_path}`
+
+**Read these files for workspace-wide context:**
+- `.brain/DECISIONS.md` - Architectural decisions
+- `.brain/CONTRACTS/` - API contracts between projects
+- `.brain/HANDOFFS/` - Work transition documents
+- `.brain/RULES/` - Coding standards
+"""
+
         if rule_file == "CLAUDE.md":
-            return f"""# Claude Instructions for {workspace_name}
+            return f"""# Claude Code Instructions
 
-## Project Context
+## Project: {workspace_name} / {project_type}
 
-This is a **{project_type}** project in the {workspace_name} workspace.
-
-## Brain Location
-
-Central brain directory: `{brain_path}`
-
-Read the following files for workspace-wide context:
-- `brain/DECISIONS.md` - Architectural decisions
-- `brain/CONTRACTS/` - API contracts
-- `brain/RULES/` - Coding standards
+{brain_section}
 
 ## Coding Standards
 
@@ -361,26 +372,38 @@ Read the following files for workspace-wide context:
 
 ## Before Making Changes
 
-1. Check DECISIONS.md for relevant architectural decisions
-2. Review any related contracts in CONTRACTS/
+1. Check `.brain/DECISIONS.md` for relevant architectural decisions
+2. Review any related contracts in `.brain/CONTRACTS/`
 3. Ensure changes align with workspace conventions
+
+## Work Logging (IMPORTANT)
+
+After completing meaningful work (feature, bugfix, refactor), log it:
+```bash
+wbrain log "Brief description of what was done"
+```
+
+Examples:
+- `wbrain log "Added user authentication endpoint"`
+- `wbrain log "Fixed date parsing bug in reports"`
+- `wbrain log "Refactored API client for better error handling"`
+
+This helps track progress and maintain project history.
+
+## Recording Decisions
+
+When making significant architectural decisions, add them to `.brain/DECISIONS.md`:
+```bash
+wbrain log "DECISION: Use PostgreSQL for user data"
+```
 """
 
-        elif rule_file == "CURSOR_RULES.md":
-            return f"""# Cursor Rules for {workspace_name}
+        elif rule_file == ".cursorrules":
+            return f"""# Cursor IDE Rules
 
-## Project Type: {project_type}
+Project Type: {project_type}
 
-## Workspace Brain
-
-This project is part of the **{workspace_name}** workspace.
-Central knowledge is stored in: `{brain_path}`
-
-## Key Files to Reference
-
-- `brain/MANIFEST.yaml` - Project registry
-- `brain/DECISIONS.md` - Architecture decisions
-- `brain/RULES/INDEX.md` - Coding standards index
+{brain_section}
 
 ## Code Generation Guidelines
 
@@ -388,34 +411,47 @@ Central knowledge is stored in: `{brain_path}`
 2. Use established patterns from the codebase
 3. Prefer simple solutions over clever ones
 4. Add comments only for non-obvious logic
+5. Check .brain/CONTRACTS/ for API contracts before modifying interfaces
 """
 
-        else:  # AI.md
+        elif rule_file == ".windsurfrules":
+            return f"""# Windsurf Rules
+
+Project Type: {project_type}
+
+{brain_section}
+
+## Code Generation Guidelines
+
+1. Match existing code style in the project
+2. Use established patterns from the codebase
+3. Prefer simple solutions over clever ones
+4. Check .brain/ directory for workspace-wide context
+"""
+
+        else:  # AI.md (generic)
             return f"""# AI Assistant Instructions
 
 ## Workspace: {workspace_name}
 ## Project Type: {project_type}
 
-## Context
-
-This project is managed by WorkspaceBrain.
-Central knowledge repository: `{brain_path}`
+{brain_section}
 
 ## Important Files
 
 | File | Purpose |
 |------|---------|
-| brain/MANIFEST.yaml | Lists all projects in workspace |
-| brain/DECISIONS.md | Architectural decision records |
-| brain/CONTRACTS/ | API and interface contracts |
-| brain/HANDOFFS/ | Work transition documents |
-| brain/RULES/ | Coding standards and conventions |
+| .brain/MANIFEST.yaml | Lists all projects in workspace |
+| .brain/DECISIONS.md | Architectural decision records |
+| .brain/CONTRACTS/ | API and interface contracts |
+| .brain/HANDOFFS/ | Work transition documents |
+| .brain/RULES/ | Coding standards and conventions |
 
 ## Guidelines
 
 1. Read relevant brain files before making significant changes
 2. Follow established patterns in the codebase
-3. Document decisions in brain/DECISIONS.md
+3. Document decisions in .brain/DECISIONS.md
 4. Update contracts when changing APIs
 """
 
@@ -478,7 +514,7 @@ Central knowledge repository: `{brain_path}`
 
 
 def unlink_project(project_path: Path) -> bool:
-    """Remove .brain symlink/directory and .wbrain/ AI rule files from a project."""
+    """Remove .brain symlink/directory and AI rule files from a project."""
     import shutil
     removed = False
 
@@ -491,23 +527,7 @@ def unlink_project(project_path: Path) -> bool:
         shutil.rmtree(brain_pointer)
         removed = True
 
-    # Remove .wbrain directory with AI rule files
-    wbrain_dir = project_path / AI_RULES_DIR
-    if wbrain_dir.exists() and wbrain_dir.is_dir():
-        # Check if it contains our generated files before removing
-        has_generated = False
-        for rule_file in AI_RULE_FILES:
-            rule_path = wbrain_dir / rule_file
-            if rule_path.exists():
-                content = rule_path.read_text(encoding="utf-8")
-                if "GENERATED BY WORKSPACEBRAIN" in content:
-                    has_generated = True
-                    break
-        if has_generated:
-            shutil.rmtree(wbrain_dir)
-            removed = True
-
-    # Also check for legacy AI rule files in project root (for backward compatibility)
+    # Remove AI rule files from project root (current location)
     for rule_file in AI_RULE_FILES:
         rule_path = project_path / rule_file
         if rule_path.exists():
@@ -515,5 +535,19 @@ def unlink_project(project_path: Path) -> bool:
             if "GENERATED BY WORKSPACEBRAIN" in content:
                 rule_path.unlink()
                 removed = True
+
+    # Clean up legacy .wbrain directory if it exists
+    legacy_wbrain_dir = project_path / AI_RULES_DIR_LEGACY
+    if legacy_wbrain_dir.exists() and legacy_wbrain_dir.is_dir():
+        has_generated = False
+        for filename in legacy_wbrain_dir.iterdir():
+            if filename.is_file():
+                content = filename.read_text(encoding="utf-8")
+                if "GENERATED BY WORKSPACEBRAIN" in content:
+                    has_generated = True
+                    break
+        if has_generated:
+            shutil.rmtree(legacy_wbrain_dir)
+            removed = True
 
     return removed
