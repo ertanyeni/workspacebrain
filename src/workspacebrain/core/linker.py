@@ -339,9 +339,10 @@ class BrainLinker:
         return self._get_default_rule_template(rule_file, project_type)
 
     def _get_default_rule_template(self, rule_file: str, project_type: str) -> str:
-        """Get default rule template content."""
+        """Get default rule template content with mandatory AI logging."""
         workspace_name = self.config.workspace_path.name
         brain_path = self.config.brain_path
+        project_name = "{project_name}"  # Placeholder, filled by context
 
         # Common brain reference section
         brain_section = f"""## Workspace Brain
@@ -350,10 +351,60 @@ This project is part of the **{workspace_name}** workspace.
 Central brain directory: `.brain` -> `{brain_path}`
 
 **Read these files for workspace-wide context:**
+- `.brain/CONTEXT/RECENT_ACTIVITY.md` - Recent activity across all projects (READ THIS FIRST)
+- `.brain/CONTEXT/OPEN_QUESTIONS.md` - Open questions needing decisions
 - `.brain/DECISIONS.md` - Architectural decisions
 - `.brain/CONTRACTS/` - API contracts between projects
-- `.brain/HANDOFFS/` - Work transition documents
 - `.brain/RULES/` - Coding standards
+"""
+
+        # Mandatory logging section for all AI tools
+        mandatory_logging = f"""## MANDATORY: AI Session Logging
+
+**CRITICAL**: You MUST log your work at the END of every session. This enables cross-project AI awareness.
+
+### At Session Start
+1. **READ** `.brain/CONTEXT/RECENT_ACTIVITY.md` to understand recent workspace changes
+2. Check if any related projects have updates that affect this project
+3. Note any open questions you might be able to answer
+
+### At Session End (REQUIRED)
+After completing meaningful work, log it using:
+
+```bash
+wbrain ai-log -p "{project_type}" -t "{{ai_tool}}" -s "What was done" \\
+  -r "Why decisions were made" \\
+  -f "file1.py,file2.py"
+```
+
+Or for detailed logs:
+```bash
+wbrain ai-log -p "{project_type}" -t "{{ai_tool}}" << 'EOF'
+## Summary
+What was accomplished in this session
+
+## What Was Done
+- Task 1
+- Task 2
+
+## AI Reasoning
+Why certain decisions were made
+
+## Related Projects
+- **other-project**: How this affects that project
+
+## Open Questions
+- Questions needing human input
+
+## Key Files
+- `path/to/file.py`
+EOF
+```
+
+### Why This Matters
+- When you switch to another project, the AI there will read your log
+- Cross-project dependencies are automatically tracked
+- Your reasoning helps future AI sessions understand context
 """
 
         if rule_file == "CLAUDE.md":
@@ -362,6 +413,15 @@ Central brain directory: `.brain` -> `{brain_path}`
 ## Project: {workspace_name} / {project_type}
 
 {brain_section}
+
+{mandatory_logging.replace("{{ai_tool}}", "claude")}
+
+## Cross-Project Awareness
+
+When your changes affect other projects:
+1. Note the affected project in your log entry using `--related`
+2. If you create/modify an API, check if a contract exists in `.brain/CONTRACTS/`
+3. If you answer an open question from another project, note it
 
 ## Coding Standards
 
@@ -372,38 +432,26 @@ Central brain directory: `.brain` -> `{brain_path}`
 
 ## Before Making Changes
 
-1. Check `.brain/DECISIONS.md` for relevant architectural decisions
-2. Review any related contracts in `.brain/CONTRACTS/`
-3. Ensure changes align with workspace conventions
-
-## Work Logging (IMPORTANT)
-
-After completing meaningful work (feature, bugfix, refactor), log it:
-```bash
-wbrain log "Brief description of what was done"
-```
-
-Examples:
-- `wbrain log "Added user authentication endpoint"`
-- `wbrain log "Fixed date parsing bug in reports"`
-- `wbrain log "Refactored API client for better error handling"`
-
-This helps track progress and maintain project history.
+1. **Read** `.brain/CONTEXT/RECENT_ACTIVITY.md` for recent cross-project activity
+2. Check `.brain/DECISIONS.md` for relevant architectural decisions
+3. Review any related contracts in `.brain/CONTRACTS/`
 
 ## Recording Decisions
 
-When making significant architectural decisions, add them to `.brain/DECISIONS.md`:
+When making significant architectural decisions:
 ```bash
-wbrain log "DECISION: Use PostgreSQL for user data"
+wbrain ai-log -s "DECISION: Use PostgreSQL for user data" -r "Reasoning for the decision"
 ```
 """
 
         elif rule_file == ".cursorrules":
             return f"""# Cursor IDE Rules
 
-Project Type: {project_type}
+Project: {project_type}
 
 {brain_section}
+
+{mandatory_logging.replace("{{ai_tool}}", "cursor")}
 
 ## Code Generation Guidelines
 
@@ -412,14 +460,23 @@ Project Type: {project_type}
 3. Prefer simple solutions over clever ones
 4. Add comments only for non-obvious logic
 5. Check .brain/CONTRACTS/ for API contracts before modifying interfaces
+
+## Cross-Project Context
+
+Before starting work:
+1. Read `.brain/CONTEXT/RECENT_ACTIVITY.md`
+2. Check for related project changes
+3. Note cross-project impacts in your log
 """
 
         elif rule_file == ".windsurfrules":
             return f"""# Windsurf Rules
 
-Project Type: {project_type}
+Project: {project_type}
 
 {brain_section}
+
+{mandatory_logging.replace("{{ai_tool}}", "windsurf")}
 
 ## Code Generation Guidelines
 
@@ -437,22 +494,26 @@ Project Type: {project_type}
 
 {brain_section}
 
+{mandatory_logging.replace("{{ai_tool}}", "generic")}
+
 ## Important Files
 
 | File | Purpose |
 |------|---------|
+| .brain/CONTEXT/RECENT_ACTIVITY.md | Recent activity summary (READ FIRST) |
+| .brain/CONTEXT/OPEN_QUESTIONS.md | Open questions across projects |
 | .brain/MANIFEST.yaml | Lists all projects in workspace |
 | .brain/DECISIONS.md | Architectural decision records |
 | .brain/CONTRACTS/ | API and interface contracts |
-| .brain/HANDOFFS/ | Work transition documents |
 | .brain/RULES/ | Coding standards and conventions |
 
 ## Guidelines
 
-1. Read relevant brain files before making significant changes
+1. **Always read** `.brain/CONTEXT/RECENT_ACTIVITY.md` before starting work
 2. Follow established patterns in the codebase
-3. Document decisions in .brain/DECISIONS.md
-4. Update contracts when changing APIs
+3. Document decisions and reasoning in your logs
+4. Note cross-project impacts when they exist
+5. **Always log** your session at the end using `wbrain ai-log`
 """
 
     def _load_manifest(self) -> Optional[BrainManifest]:

@@ -53,5 +53,7 @@ def temp_workspace_with_brain(temp_workspace: Path) -> Path:
     (brain_dir / "CONTRACTS").mkdir()
     (brain_dir / "HANDOFFS").mkdir()
     (brain_dir / "RULES").mkdir()
+    (brain_dir / "LOGS").mkdir()
+    (brain_dir / "CONTEXT").mkdir()
 
     return temp_workspace

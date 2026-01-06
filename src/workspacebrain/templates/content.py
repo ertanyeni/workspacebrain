@@ -25,7 +25,11 @@ brain/
 ├── DECISIONS.md       # Decision log (ADRs)
 ├── CONTRACTS/         # API contracts and interfaces
 ├── HANDOFFS/          # Work transition documentation
-└── RULES/             # Coding standards and conventions
+├── RULES/             # Coding standards and conventions
+├── LOGS/              # Daily work logs with AI session data
+└── CONTEXT/           # Auto-generated context for AI assistants
+    ├── RECENT_ACTIVITY.md   # Last 3 days of activity summary
+    └── OPEN_QUESTIONS.md    # Aggregated open questions
 ```
 
 ## Usage
@@ -39,10 +43,12 @@ brain/
 
 ### For AI Agents
 
-1. Read MANIFEST.yaml to understand workspace structure
-2. Follow rules in RULES/ directory
-3. Reference contracts for API integration
-4. Use handoffs for context when continuing work
+1. **FIRST** read `CONTEXT/RECENT_ACTIVITY.md` for recent cross-project activity
+2. Check `CONTEXT/OPEN_QUESTIONS.md` for pending decisions
+3. Read MANIFEST.yaml to understand workspace structure
+4. Follow rules in RULES/ directory
+5. Reference contracts for API integration
+6. **ALWAYS** log your session using `wbrain ai-log` when done
 
 ## Maintained By
 
