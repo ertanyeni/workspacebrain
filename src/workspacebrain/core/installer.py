@@ -40,6 +40,8 @@ class BrainInstaller:
         - brain/CONTRACTS/
         - brain/HANDOFFS/
         - brain/RULES/
+        - brain/LOGS/
+        - brain/CONTEXT/
 
         If force=False, existing files/directories are skipped (idempotent).
         If force=True, existing files are overwritten.
@@ -54,6 +56,8 @@ class BrainInstaller:
             self._create_directory(self.config.contracts_path, result)
             self._create_directory(self.config.handoffs_path, result)
             self._create_directory(self.config.rules_path, result)
+            self._create_directory(self.config.logs_path, result)
+            self._create_directory(self.config.context_path, result)
 
             # Create files
             self._create_readme(result)
@@ -64,6 +68,8 @@ class BrainInstaller:
             # Create .gitkeep files in empty directories
             self._create_gitkeep(self.config.contracts_path, result)
             self._create_gitkeep(self.config.handoffs_path, result)
+            self._create_gitkeep(self.config.logs_path, result)
+            self._create_gitkeep(self.config.context_path, result)
 
         except Exception as e:
             result.success = False

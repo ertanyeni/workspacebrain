@@ -89,3 +89,75 @@ class BrainConfig(BaseModel):
     def rules_path(self) -> Path:
         """Get the path to RULES directory."""
         return self.brain_path / "RULES"
+
+    @property
+    def logs_path(self) -> Path:
+        """Get the path to LOGS directory."""
+        return self.brain_path / "LOGS"
+
+    @property
+    def context_path(self) -> Path:
+        """Get the path to CONTEXT directory."""
+        return self.brain_path / "CONTEXT"
+
+
+class AISessionEntry(BaseModel):
+    """Structured AI session log entry for cross-project context sharing."""
+
+    timestamp: datetime = Field(default_factory=datetime.now)
+    project_name: str
+    project_type: str = "unknown"
+    ai_tool: str = "generic"  # claude, cursor, windsurf, copilot, generic
+    summary: str
+    what_was_done: list[str] = Field(default_factory=list)
+    reasoning: Optional[str] = None
+    related_projects: dict[str, str] = Field(default_factory=dict)  # project -> why
+    open_questions: list[str] = Field(default_factory=list)
+    key_files: list[str] = Field(default_factory=list)
+    previous_context_used: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+
+    def to_markdown(self) -> str:
+        """Convert session entry to markdown format for log file."""
+        lines = [
+            f"## Session: {self.timestamp.strftime('%H:%M')} - {self.project_name} ({self.ai_tool})",
+            "",
+            "### Summary",
+            self.summary,
+            "",
+        ]
+
+        if self.what_was_done:
+            lines.extend(["### What Was Done"])
+            for item in self.what_was_done:
+                lines.append(f"- {item}")
+            lines.append("")
+
+        if self.reasoning:
+            lines.extend(["### AI Reasoning", self.reasoning, ""])
+
+        if self.related_projects:
+            lines.append("### Related Projects")
+            for project, reason in self.related_projects.items():
+                lines.append(f"- **{project}**: {reason}")
+            lines.append("")
+
+        if self.open_questions:
+            lines.append("### Open Questions")
+            for q in self.open_questions:
+                lines.append(f"- {q}")
+            lines.append("")
+
+        if self.key_files:
+            lines.append("### Key Files")
+            for f in self.key_files:
+                lines.append(f"- `{f}`")
+            lines.append("")
+
+        if self.previous_context_used:
+            lines.extend(["### Previous Context Used", self.previous_context_used, ""])
+
+        lines.append("---")
+        lines.append("")
+
+        return "\n".join(lines)

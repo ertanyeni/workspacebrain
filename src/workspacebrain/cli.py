@@ -10,11 +10,14 @@ from workspacebrain import __version__
 from rich.panel import Panel
 from rich.table import Table
 
+from workspacebrain.core.ai_logger import AISessionLogger
+from workspacebrain.core.context_generator import ContextGenerator
 from workspacebrain.core.doctor import BrainDoctor, CheckStatus
 from workspacebrain.core.installer import BrainInstaller
 from workspacebrain.core.linker import AI_RULE_FILES, BrainLinker, unlink_project
+from workspacebrain.core.log_parser import LogParser
 from workspacebrain.core.scanner import WorkspaceScanner
-from workspacebrain.models import BrainConfig
+from workspacebrain.models import AISessionEntry, BrainConfig
 
 app = typer.Typer(
     name="workspacebrain",
@@ -588,6 +591,301 @@ def logs(
 
     if not found_logs:
         console.print(f"[dim]No logs in the last {days} days.[/]")
+
+
+@app.command("ai-log")
+def ai_log(
+    summary: Annotated[
+        Optional[str],
+        typer.Option(
+            "--summary",
+            "-s",
+            help="Summary of what was done.",
+        ),
+    ] = None,
+    project: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project",
+            "-p",
+            help="Project name (auto-detected from current directory if not specified).",
+        ),
+    ] = None,
+    tool: Annotated[
+        str,
+        typer.Option(
+            "--tool",
+            "-t",
+            help="AI tool name (claude, cursor, windsurf, copilot, generic).",
+        ),
+    ] = "generic",
+    reasoning: Annotated[
+        Optional[str],
+        typer.Option(
+            "--reasoning",
+            "-r",
+            help="AI reasoning for decisions made.",
+        ),
+    ] = None,
+    related: Annotated[
+        Optional[str],
+        typer.Option(
+            "--related",
+            help="Related projects (comma-separated, format: 'project:reason,project2:reason2').",
+        ),
+    ] = None,
+    questions: Annotated[
+        Optional[str],
+        typer.Option(
+            "--questions",
+            "-q",
+            help="Open questions (comma-separated).",
+        ),
+    ] = None,
+    files: Annotated[
+        Optional[str],
+        typer.Option(
+            "--files",
+            "-f",
+            help="Key files modified (comma-separated).",
+        ),
+    ] = None,
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path (searches parent directories if not specified).",
+        ),
+    ] = None,
+) -> None:
+    """Log an AI session with structured metadata for cross-project context.
+
+    This command is designed to be called by AI assistants after completing work.
+    It logs structured session data and automatically refreshes context files.
+
+    Examples:
+        wbrain ai-log -p backend -t claude -s "Added auth endpoint"
+        wbrain ai-log -s "Fixed bug" -r "Used JWT instead of sessions" -f "auth.py,routes.py"
+
+    AI assistants can also pipe structured input:
+        wbrain ai-log -p backend -t claude << 'EOF'
+        ## Summary
+        Added user authentication
+
+        ## AI Reasoning
+        Chose JWT for stateless auth
+        EOF
+    """
+    import sys
+
+    # Find workspace
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found. Run 'wbrain init' first.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+
+    # Auto-detect project from current directory
+    if project is None:
+        cwd = Path.cwd()
+        try:
+            rel_path = cwd.relative_to(workspace_path)
+            parts = rel_path.parts
+            if parts and parts[0] != "brain":
+                project = parts[0]
+        except ValueError:
+            pass
+
+    if project is None:
+        project = "general"
+
+    # Check if there's stdin input (heredoc style)
+    stdin_data = None
+    if not sys.stdin.isatty():
+        stdin_data = sys.stdin.read().strip()
+
+    logger = AISessionLogger(config)
+
+    if stdin_data:
+        # Parse structured input from stdin
+        parsed = logger.parse_stdin_log(stdin_data)
+        entry = AISessionEntry(
+            project_name=project,
+            ai_tool=tool,
+            summary=parsed.get("summary", summary or "AI session logged"),
+            what_was_done=parsed.get("what_was_done", []),
+            reasoning=parsed.get("reasoning") or reasoning,
+            related_projects=parsed.get("related_projects", {}),
+            open_questions=parsed.get("open_questions", []),
+            key_files=parsed.get("key_files", []),
+        )
+    else:
+        if not summary:
+            console.print("[bold red]✗[/] Summary is required. Use --summary or -s.")
+            raise typer.Exit(code=1)
+
+        entry = logger.create_entry_from_args(
+            summary=summary,
+            project=project,
+            tool=tool,
+            reasoning=reasoning,
+            related=related,
+            questions=questions,
+            files=files,
+        )
+
+    # Log the session
+    log_file = logger.log_session(entry)
+
+    console.print(f"[green]✓[/] AI session logged: [{entry.ai_tool}] {entry.summary}")
+    console.print(f"  [dim]→ {log_file.relative_to(workspace_path)}[/]")
+
+    # Auto-refresh context files
+    context_gen = ContextGenerator(config)
+    with console.status("[dim]Refreshing context...[/]"):
+        context_gen.refresh_all_context(days=3)
+
+    console.print(f"  [dim]→ Context files updated[/]")
+
+
+@app.command()
+def context(
+    days: Annotated[
+        int,
+        typer.Option(
+            "--days",
+            "-d",
+            help="Number of days to include in context.",
+        ),
+    ] = 3,
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path.",
+        ),
+    ] = None,
+) -> None:
+    """Generate/refresh context files from recent logs.
+
+    Creates/updates:
+    - brain/CONTEXT/RECENT_ACTIVITY.md - Summary of recent work across all projects
+    - brain/CONTEXT/OPEN_QUESTIONS.md - Aggregated open questions
+
+    These files are automatically read by AI assistants for cross-project awareness.
+    """
+    # Find workspace
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+    context_gen = ContextGenerator(config)
+
+    with console.status("[bold green]Generating context files..."):
+        generated = context_gen.refresh_all_context(days=days)
+
+    console.print(f"[bold green]✓[/] Context files generated from last {days} days")
+    for name, path in generated.items():
+        console.print(f"  [dim]•[/] {path.relative_to(workspace_path)}")
+
+
+@app.command()
+def status(
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path.",
+        ),
+    ] = None,
+    days: Annotated[
+        int,
+        typer.Option(
+            "--days",
+            "-d",
+            help="Number of days to show.",
+        ),
+    ] = 3,
+) -> None:
+    """Show cross-project status summary.
+
+    Displays recent activity, open questions, and project relationships
+    from AI session logs.
+    """
+    # Find workspace
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+    parser = LogParser(config)
+
+    console.print()
+    console.print(
+        Panel.fit(
+            f"[bold]Workspace Status[/]\n[dim]Last {days} days[/]",
+            border_style="blue",
+        )
+    )
+    console.print()
+
+    entries = parser.get_logs_in_range(days)
+
+    if not entries:
+        console.print("[dim]No AI sessions logged in this period.[/]")
+        console.print("[dim]Use 'wbrain ai-log' to log AI sessions.[/]")
+        return
+
+    # Group by project
+    by_project: dict[str, list] = {}
+    for entry in entries:
+        if entry.project_name not in by_project:
+            by_project[entry.project_name] = []
+        by_project[entry.project_name].append(entry)
+
+    # Show activity by project
+    console.print("[bold]Recent Activity[/]")
+    console.print()
+
+    for project, project_entries in by_project.items():
+        console.print(f"[cyan]{project}[/]")
+        for entry in project_entries[:3]:  # Show last 3 per project
+            timestamp = entry.timestamp.strftime("%Y-%m-%d %H:%M")
+            console.print(f"  [dim]{timestamp}[/] ({entry.ai_tool}) {entry.summary}")
+        if len(project_entries) > 3:
+            console.print(f"  [dim]... and {len(project_entries) - 3} more[/]")
+        console.print()
+
+    # Show relationships
+    relationships = parser.extract_project_relationships(entries)
+    if relationships:
+        console.print("[bold]Project Relationships[/]")
+        console.print()
+        for project, related in relationships.items():
+            if related:
+                console.print(f"  [cyan]{project}[/] ↔ {', '.join(related)}")
+        console.print()
+
+    # Show open questions
+    questions = parser.extract_open_questions(entries)
+    if questions:
+        console.print("[bold]Open Questions[/]")
+        console.print()
+        for q in questions[:5]:  # Show first 5
+            console.print(f"  [yellow]?[/] [{q['project']}] {q['question']}")
+        if len(questions) > 5:
+            console.print(f"  [dim]... and {len(questions) - 5} more[/]")
+        console.print()
 
 
 def _find_workspace_with_brain(start_path: Path) -> Optional[Path]:
