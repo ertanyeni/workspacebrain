@@ -16,6 +16,7 @@ from workspacebrain.core.doctor import BrainDoctor, CheckStatus
 from workspacebrain.core.installer import BrainInstaller
 from workspacebrain.core.linker import AI_RULE_FILES, BrainLinker, unlink_project
 from workspacebrain.core.log_parser import LogParser
+from workspacebrain.core.relationship_manager import RelationshipManager
 from workspacebrain.core.scanner import WorkspaceScanner
 from workspacebrain.models import AISessionEntry, BrainConfig
 
@@ -743,12 +744,12 @@ def ai_log(
     console.print(f"[green]✓[/] AI session logged: [{entry.ai_tool}] {entry.summary}")
     console.print(f"  [dim]→ {log_file.relative_to(workspace_path)}[/]")
 
-    # Auto-refresh context files
+    # Auto-refresh context files (both global and project-specific)
     context_gen = ContextGenerator(config)
     with console.status("[dim]Refreshing context...[/]"):
-        context_gen.refresh_all_context(days=3)
+        context_gen.refresh_all_project_contexts(days=3)
 
-    console.print(f"  [dim]→ Context files updated[/]")
+    console.print(f"  [dim]→ Context files updated (global + project-specific)[/]")
 
 
 @app.command()
@@ -769,14 +770,23 @@ def context(
             help="Workspace path.",
         ),
     ] = None,
+    project_only: Annotated[
+        bool,
+        typer.Option(
+            "--project-only",
+            help="Only generate project-specific context files.",
+        ),
+    ] = False,
 ) -> None:
     """Generate/refresh context files from recent logs.
 
     Creates/updates:
     - brain/CONTEXT/RECENT_ACTIVITY.md - Summary of recent work across all projects
     - brain/CONTEXT/OPEN_QUESTIONS.md - Aggregated open questions
+    - brain/CONTEXT/projects/{project}.md - Project-specific filtered context
 
-    These files are automatically read by AI assistants for cross-project awareness.
+    Project-specific context files only include activity from related projects,
+    saving tokens and reducing noise for AI assistants.
     """
     # Find workspace
     if workspace_path is None:
@@ -789,11 +799,27 @@ def context(
     context_gen = ContextGenerator(config)
 
     with console.status("[bold green]Generating context files..."):
-        generated = context_gen.refresh_all_context(days=days)
+        if project_only:
+            generated = context_gen.refresh_project_contexts(days=days)
+        else:
+            generated = context_gen.refresh_all_project_contexts(days=days)
 
     console.print(f"[bold green]✓[/] Context files generated from last {days} days")
-    for name, path in generated.items():
-        console.print(f"  [dim]•[/] {path.relative_to(workspace_path)}")
+
+    # Separate global and project-specific files
+    global_files = {k: v for k, v in generated.items() if not k.startswith("project:")}
+    project_files = {k: v for k, v in generated.items() if k.startswith("project:")}
+
+    if global_files:
+        console.print("\n[bold]Global context:[/]")
+        for name, path in global_files.items():
+            console.print(f"  [dim]•[/] {path.relative_to(workspace_path)}")
+
+    if project_files:
+        console.print("\n[bold]Project-specific context:[/]")
+        for name, path in project_files.items():
+            project_name = name.replace("project:", "")
+            console.print(f"  [dim]•[/] {path.relative_to(workspace_path)} [cyan]({project_name})[/]")
 
 
 @app.command()
@@ -886,6 +912,134 @@ def status(
         if len(questions) > 5:
             console.print(f"  [dim]... and {len(questions) - 5} more[/]")
         console.print()
+
+
+@app.command()
+def relationships(
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path.",
+        ),
+    ] = None,
+    refresh: Annotated[
+        bool,
+        typer.Option(
+            "--refresh",
+            "-r",
+            help="Refresh relationships from logs.",
+        ),
+    ] = False,
+    days: Annotated[
+        int,
+        typer.Option(
+            "--days",
+            "-d",
+            help="Number of days to scan for relationships.",
+        ),
+    ] = 7,
+    project: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project",
+            "-p",
+            help="Show relationships for a specific project.",
+        ),
+    ] = None,
+) -> None:
+    """Show and manage project relationships.
+
+    Relationships are automatically discovered from AI session logs
+    when one project mentions another in its related_projects field.
+
+    Examples:
+        wbrain relationships              # Show all relationships
+        wbrain relationships -r           # Refresh from logs
+        wbrain relationships -p backend   # Show backend's relationships
+    """
+    # Find workspace
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+    manager = RelationshipManager(config)
+
+    console.print()
+    console.print(
+        Panel.fit(
+            "[bold]Project Relationships[/]\n"
+            "[dim]Auto-discovered from AI session logs[/]",
+            border_style="blue",
+        )
+    )
+    console.print()
+
+    if refresh:
+        with console.status("[bold green]Refreshing relationships from logs..."):
+            manager.refresh_from_logs(days=days)
+        console.print(f"[green]✓[/] Relationships refreshed from last {days} days of logs")
+        console.print()
+
+    graph = manager.get_relationship_graph()
+
+    if not graph:
+        console.print("[dim]No relationships discovered yet.[/]")
+        console.print()
+        console.print("[dim]Relationships are created when AI sessions log related projects:[/]")
+        console.print('[cyan]wbrain ai-log -s "..." --related "project:reason"[/]')
+        return
+
+    if project:
+        # Show specific project's relationships
+        related = manager.get_related_projects(project)
+        if not related:
+            console.print(f"[dim]No relationships found for {project}.[/]")
+            return
+
+        console.print(f"[bold cyan]{project}[/] is related to:")
+        console.print()
+
+        # Show with reasons
+        all_rels = manager.get_all_relationships()
+        for source, target, reason in all_rels:
+            if source == project:
+                console.print(f"  [green]→[/] [bold]{target}[/]")
+                if reason:
+                    console.print(f"    [dim]{reason}[/]")
+            elif target == project:
+                # Find reverse relationship
+                for s2, t2, r2 in all_rels:
+                    if s2 == target and t2 == project:
+                        console.print(f"  [yellow]←[/] [bold]{target}[/]")
+                        if r2:
+                            console.print(f"    [dim]{r2}[/]")
+                        break
+                else:
+                    console.print(f"  [yellow]←[/] [bold]{target}[/] [dim](reverse)[/]")
+    else:
+        # Show all relationships
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Project", style="cyan")
+        table.add_column("Related To", style="green")
+        table.add_column("Context Files", style="dim")
+
+        for proj, related in sorted(graph.items()):
+            related_str = ", ".join(sorted(related)) if related else "-"
+            context_file = f".brain/CONTEXT/projects/{proj}.md"
+            table.add_row(proj, related_str, context_file)
+
+        console.print(table)
+        console.print()
+
+        # Show total stats
+        total_projects = len(graph)
+        total_relationships = sum(len(v) for v in graph.values()) // 2  # Divide by 2 since bidirectional
+        console.print(f"[dim]Total: {total_projects} projects, {total_relationships} relationships[/]")
 
 
 def _find_workspace_with_brain(start_path: Path) -> Optional[Path]:

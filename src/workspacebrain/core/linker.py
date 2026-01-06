@@ -344,17 +344,16 @@ class BrainLinker:
         brain_path = self.config.brain_path
         project_name = "{project_name}"  # Placeholder, filled by context
 
-        # Common brain reference section
+        # Common brain reference section - now with project-specific context
         brain_section = f"""## Workspace Brain
 
 This project is part of the **{workspace_name}** workspace.
 Central brain directory: `.brain` -> `{brain_path}`
 
 **Read these files for workspace-wide context:**
-- `.brain/CONTEXT/RECENT_ACTIVITY.md` - Recent activity across all projects (READ THIS FIRST)
-- `.brain/CONTEXT/OPEN_QUESTIONS.md` - Open questions needing decisions
 - `.brain/DECISIONS.md` - Architectural decisions
 - `.brain/CONTRACTS/` - API contracts between projects
+- `.brain/HANDOFFS/` - Work transition documents
 - `.brain/RULES/` - Coding standards
 """
 
@@ -364,8 +363,10 @@ Central brain directory: `.brain` -> `{brain_path}`
 **CRITICAL**: You MUST log your work at the END of every session. This enables cross-project AI awareness.
 
 ### At Session Start
-1. **READ** `.brain/CONTEXT/RECENT_ACTIVITY.md` to understand recent workspace changes
-2. Check if any related projects have updates that affect this project
+1. **READ** `.brain/CONTEXT/projects/{{project_name}}.md` for context specific to this project and related projects only
+   - This file only includes activity from projects that interact with this one
+   - Saves tokens by excluding unrelated project activity
+2. Check for updates that affect this project
 3. Note any open questions you might be able to answer
 
 ### At Session End (REQUIRED)
@@ -432,7 +433,7 @@ When your changes affect other projects:
 
 ## Before Making Changes
 
-1. **Read** `.brain/CONTEXT/RECENT_ACTIVITY.md` for recent cross-project activity
+1. **Read** `.brain/CONTEXT/projects/{project_type}.md` for filtered project context
 2. Check `.brain/DECISIONS.md` for relevant architectural decisions
 3. Review any related contracts in `.brain/CONTRACTS/`
 
@@ -464,7 +465,7 @@ Project: {project_type}
 ## Cross-Project Context
 
 Before starting work:
-1. Read `.brain/CONTEXT/RECENT_ACTIVITY.md`
+1. Read `.brain/CONTEXT/projects/{project_type}.md` for filtered context
 2. Check for related project changes
 3. Note cross-project impacts in your log
 """
@@ -500,7 +501,7 @@ Project: {project_type}
 
 | File | Purpose |
 |------|---------|
-| .brain/CONTEXT/RECENT_ACTIVITY.md | Recent activity summary (READ FIRST) |
+| .brain/CONTEXT/projects/{project_type}.md | Filtered context for this project (READ FIRST) |
 | .brain/CONTEXT/OPEN_QUESTIONS.md | Open questions across projects |
 | .brain/MANIFEST.yaml | Lists all projects in workspace |
 | .brain/DECISIONS.md | Architectural decision records |
@@ -509,7 +510,7 @@ Project: {project_type}
 
 ## Guidelines
 
-1. **Always read** `.brain/CONTEXT/RECENT_ACTIVITY.md` before starting work
+1. **Always read** `.brain/CONTEXT/projects/{project_type}.md` before starting work
 2. Follow established patterns in the codebase
 3. Document decisions and reasoning in your logs
 4. Note cross-project impacts when they exist
