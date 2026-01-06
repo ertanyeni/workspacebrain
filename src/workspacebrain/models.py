@@ -7,6 +7,30 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class ProjectRelationship(BaseModel):
+    """Represents a relationship between two projects.
+
+    Relationships are automatically discovered from log entries
+    when one project mentions another in its related_projects field.
+    """
+
+    source_project: str  # Project that created the log entry
+    target_project: str  # Project mentioned in related_projects
+    reason: str  # Why they're related (from log entry)
+    discovered_at: datetime = Field(default_factory=datetime.now)
+    last_seen: datetime = Field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for YAML serialization."""
+        return {
+            "source": self.source_project,
+            "target": self.target_project,
+            "reason": self.reason,
+            "discovered_at": self.discovered_at.isoformat(),
+            "last_seen": self.last_seen.isoformat(),
+        }
+
+
 class ProjectInfo(BaseModel):
     """Information about a detected project in the workspace."""
 
@@ -99,6 +123,16 @@ class BrainConfig(BaseModel):
     def context_path(self) -> Path:
         """Get the path to CONTEXT directory."""
         return self.brain_path / "CONTEXT"
+
+    @property
+    def context_projects_path(self) -> Path:
+        """Get the path to project-specific context files."""
+        return self.context_path / "projects"
+
+    @property
+    def relationships_path(self) -> Path:
+        """Get the path to relationships.yaml file."""
+        return self.brain_path / "relationships.yaml"
 
 
 class AISessionEntry(BaseModel):

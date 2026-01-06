@@ -6,14 +6,21 @@ from typing import Optional
 
 from ..models import AISessionEntry, BrainConfig
 from .log_parser import LogParser
+from .relationship_manager import RelationshipManager
 
 
 class ContextGenerator:
-    """Generates context files from logs for AI assistants to read."""
+    """Generates context files from logs for AI assistants to read.
+
+    Supports two modes:
+    1. Global context: RECENT_ACTIVITY.md with all projects (legacy)
+    2. Project-specific context: projects/{project}.md with only related projects
+    """
 
     def __init__(self, config: BrainConfig):
         self.config = config
         self.parser = LogParser(config)
+        self.relationship_manager = RelationshipManager(config)
 
     def refresh_all_context(self, days: int = 3) -> dict[str, Path]:
         """Regenerate all context files.
@@ -206,3 +213,171 @@ class ContextGenerator:
                 lines.append(f"  - Impact on {project_name}: {reason}")
 
         return "\n".join(lines)
+
+    def refresh_project_contexts(self, days: int = 3) -> dict[str, Path]:
+        """Generate project-specific context files in CONTEXT/projects/.
+
+        Each project gets a context file containing only:
+        - Its own activity
+        - Activity from related projects
+
+        Returns dict mapping project_name -> generated file path.
+        """
+        # First, refresh relationships from logs
+        self.relationship_manager.refresh_from_logs(days)
+
+        # Create projects directory
+        projects_dir = self.config.context_projects_path
+        projects_dir.mkdir(parents=True, exist_ok=True)
+
+        generated = {}
+        entries = self.parser.get_logs_in_range(days)
+
+        # Get all unique projects from entries
+        all_projects: set[str] = set()
+        for entry in entries:
+            all_projects.add(entry.project_name)
+            all_projects.update(entry.related_projects.keys())
+
+        # Generate context file for each project
+        for project_name in all_projects:
+            content = self._generate_project_context(project_name, entries, days)
+            context_path = projects_dir / f"{project_name}.md"
+            context_path.write_text(content, encoding="utf-8")
+            generated[project_name] = context_path
+
+        return generated
+
+    def _generate_project_context(
+        self, project_name: str, all_entries: list[AISessionEntry], days: int
+    ) -> str:
+        """Generate context content for a specific project.
+
+        Only includes:
+        - This project's own activity
+        - Activity from directly related projects
+        """
+        now = datetime.now()
+
+        # Get related projects
+        related_projects = self.relationship_manager.get_related_projects(project_name)
+        context_projects = {project_name} | related_projects
+
+        lines = [
+            f"# Context for {project_name}",
+            f"*Auto-generated: {now.strftime('%Y-%m-%d %H:%M')}*",
+            "",
+        ]
+
+        # Filter entries to only include relevant projects
+        relevant_entries = [
+            e for e in all_entries if e.project_name in context_projects
+        ]
+
+        if not relevant_entries:
+            lines.extend([
+                f"*No recent activity for {project_name} or related projects.*",
+                "",
+                "Related projects: " + (", ".join(sorted(related_projects)) if related_projects else "None discovered yet"),
+                "",
+                "To log a session:",
+                "```bash",
+                f'wbrain ai-log -p "{project_name}" -t "claude" -s "What was done"',
+                "```",
+            ])
+            return "\n".join(lines)
+
+        # Show related projects
+        if related_projects:
+            lines.extend([
+                "## Related Projects",
+                "",
+                "This context includes activity from:",
+                f"- **{project_name}** (this project)",
+            ])
+            for rp in sorted(related_projects):
+                lines.append(f"- {rp}")
+            lines.append("")
+
+        # Group entries by project
+        by_project: dict[str, list[AISessionEntry]] = {}
+        for entry in relevant_entries:
+            if entry.project_name not in by_project:
+                by_project[entry.project_name] = []
+            by_project[entry.project_name].append(entry)
+
+        # Show this project's activity first
+        if project_name in by_project:
+            lines.append(f"## {project_name} (This Project)")
+            lines.append("")
+            for entry in by_project[project_name]:
+                self._append_entry_summary(lines, entry)
+            lines.append("")
+
+        # Show related projects' activity
+        for rp in sorted(related_projects):
+            if rp in by_project:
+                lines.append(f"## {rp}")
+                lines.append("")
+                for entry in by_project[rp]:
+                    self._append_entry_summary(lines, entry, highlight_for=project_name)
+                lines.append("")
+
+        # Show open questions relevant to this project
+        relevant_questions = []
+        for entry in relevant_entries:
+            for q in entry.open_questions:
+                relevant_questions.append({
+                    "project": entry.project_name,
+                    "question": q,
+                    "timestamp": entry.timestamp.strftime("%Y-%m-%d"),
+                })
+
+        if relevant_questions:
+            lines.extend([
+                "## Open Questions",
+                "",
+            ])
+            for q in relevant_questions[:5]:  # Limit to 5
+                lines.append(f"- [{q['project']}] {q['question']}")
+            lines.append("")
+
+        lines.extend([
+            "---",
+            f"*Filtered context for {project_name}. Only includes related projects.*",
+        ])
+
+        return "\n".join(lines)
+
+    def _append_entry_summary(
+        self,
+        lines: list[str],
+        entry: AISessionEntry,
+        highlight_for: Optional[str] = None,
+    ) -> None:
+        """Append a formatted entry summary to lines."""
+        timestamp = entry.timestamp.strftime("%Y-%m-%d %H:%M")
+        lines.append(f"- **{timestamp}** ({entry.ai_tool}) {entry.summary}")
+
+        # If highlighting for a specific project, show why it's relevant
+        if highlight_for and highlight_for in entry.related_projects:
+            reason = entry.related_projects[highlight_for]
+            lines.append(f"  - Impact on {highlight_for}: {reason}")
+
+        # Show key files if any
+        if entry.key_files:
+            files_str = ", ".join(f"`{f}`" for f in entry.key_files[:3])
+            lines.append(f"  - Files: {files_str}")
+
+    def refresh_all_project_contexts(self, days: int = 3) -> dict[str, Path]:
+        """Refresh both global and project-specific contexts.
+
+        Returns combined dict of all generated files.
+        """
+        generated = self.refresh_all_context(days)
+        project_contexts = self.refresh_project_contexts(days)
+
+        for project_name, path in project_contexts.items():
+            generated[f"project:{project_name}"] = path
+
+        return generated
