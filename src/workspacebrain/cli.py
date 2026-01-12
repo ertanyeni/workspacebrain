@@ -57,7 +57,7 @@ def main(
     pass
 
 
-@app.command()
+@app.command(hidden=True)
 def init(
     workspace_path: Annotated[
         Optional[Path],
@@ -112,7 +112,7 @@ def init(
         raise typer.Exit(code=1)
 
 
-@app.command()
+@app.command(hidden=True)
 def scan(
     workspace_path: Annotated[
         Optional[Path],
@@ -163,7 +163,7 @@ def scan(
         raise typer.Exit(code=1)
 
 
-@app.command()
+@app.command(hidden=True)
 def link(
     workspace_path: Annotated[
         Optional[Path],
@@ -1214,11 +1214,13 @@ def uninstall(
 security_app = typer.Typer(
     name="security",
     help="Security analysis and vulnerability management.",
+    no_args_is_help=False,  # Allow default command
 )
 
 
-@security_app.command("scan")
-def security_scan(
+@security_app.callback(invoke_without_command=True)
+def security_default(
+    ctx: typer.Context,
     workspace_path: Annotated[
         Optional[Path],
         typer.Option(
@@ -1227,15 +1229,30 @@ def security_scan(
             help="Workspace path (searches parent directories if not specified).",
         ),
     ] = None,
+    scan_only: Annotated[
+        bool,
+        typer.Option(
+            "--scan-only",
+            help="Only scan for vulnerabilities, don't analyze.",
+        ),
+    ] = False,
+    analyze_only: Annotated[
+        bool,
+        typer.Option(
+            "--analyze-only",
+            help="Only analyze existing scan results, don't scan.",
+        ),
+    ] = False,
 ) -> None:
-    """Scan all projects for security vulnerabilities.
+    """Security analysis and vulnerability management.
 
-    Collects alerts from:
-    - GitHub Dependabot (if GitHub token available)
-    - npm audit (Node.js projects)
-    - pip-audit (Python projects)
-    - cargo audit (Rust projects)
+    By default, performs both scan and analyze in one command.
+    Use --scan-only or --analyze-only to run only one step.
     """
+    # If a subcommand was invoked, don't run default
+    if ctx.invoked_subcommand is not None:
+        return
+
     # Find workspace
     if workspace_path is None:
         workspace_path = _find_workspace_with_brain(Path.cwd())
@@ -1244,6 +1261,18 @@ def security_scan(
             raise typer.Exit(code=1)
 
     config = BrainConfig(workspace_path=workspace_path)
+
+    # Run scan unless analyze_only
+    if not analyze_only:
+        _run_security_scan(config, workspace_path)
+
+    # Run analyze unless scan_only
+    if not scan_only:
+        _run_security_analyze(config, workspace_path)
+
+
+def _run_security_scan(config: BrainConfig, workspace_path: Path) -> None:
+    """Run security scan and save alerts."""
     analyzer = SecurityAnalyzer(config)
 
     with console.status("[bold green]Scanning for security vulnerabilities..."):
@@ -1301,37 +1330,14 @@ def security_scan(
         console.print()
 
 
-@security_app.command("analyze")
-def security_analyze(
-    workspace_path: Annotated[
-        Optional[Path],
-        typer.Option(
-            "--workspace",
-            "-w",
-            help="Workspace path.",
-        ),
-    ] = None,
-) -> None:
-    """Analyze security alerts and generate risk assessments.
-
-    Performs risk scoring, prioritization, and generates AI-friendly context.
-    """
-    # Find workspace
-    if workspace_path is None:
-        workspace_path = _find_workspace_with_brain(Path.cwd())
-        if workspace_path is None:
-            console.print("[bold red]✗[/] No brain found.")
-            raise typer.Exit(code=1)
-
-    config = BrainConfig(workspace_path=workspace_path)
-
-    # Load alerts
+def _run_security_analyze(config: BrainConfig, workspace_path: Path) -> None:
+    """Run security analysis on existing alerts."""
     context_gen = SecurityContextGenerator(config)
     alerts_path = config.security_alerts_path
 
     if not alerts_path.exists():
         console.print(
-            "[bold yellow]![/] No alerts found. Run 'wbrain security scan' first."
+            "[bold yellow]![/] No alerts found. Run 'wbrain security --scan-only' first."
         )
         raise typer.Exit(code=1)
 
@@ -1391,6 +1397,66 @@ def security_analyze(
     console.print()
     console.print(action_table)
     console.print()
+
+
+@security_app.command("scan", hidden=True)
+def security_scan(
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path (searches parent directories if not specified).",
+        ),
+    ] = None,
+) -> None:
+    """[DEPRECATED] Scan all projects for security vulnerabilities.
+
+    Use 'wbrain security --scan-only' instead.
+    This command is kept for backward compatibility.
+    """
+    console.print("[yellow]⚠[/] [dim]This command is deprecated. Use 'wbrain security --scan-only' instead.[/]")
+    console.print()
+
+    # Find workspace
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+    _run_security_scan(config, workspace_path)
+
+
+@security_app.command("analyze", hidden=True)
+def security_analyze(
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path.",
+        ),
+    ] = None,
+) -> None:
+    """[DEPRECATED] Analyze security alerts and generate risk assessments.
+
+    Use 'wbrain security --analyze-only' instead.
+    This command is kept for backward compatibility.
+    """
+    console.print("[yellow]⚠[/] [dim]This command is deprecated. Use 'wbrain security --analyze-only' instead.[/]")
+    console.print()
+
+    # Find workspace
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+    _run_security_analyze(config, workspace_path)
 
 
 @security_app.command("status")

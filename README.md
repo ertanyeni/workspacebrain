@@ -46,28 +46,72 @@ pip install git+https://github.com/USER/workspacebrain.git
 
 ```bash
 cd ~/my-projects    # Your workspace with multiple projects
-wbrain setup        # Creates brain, detects projects, links everything
+wbrain setup        # One command: creates brain, detects projects, links everything
 ```
 
-That's it. Your AI assistants now have:
+That's it! Your AI assistants now have:
 - `.brain` symlink in each project pointing to central brain
 - `CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `AI.md` with instructions
 - Automatic cross-project context sharing
 
+**Check security:**
+```bash
+wbrain security     # Scans and analyzes vulnerabilities automatically
+```
+
+**View status:**
+```bash
+wbrain status       # See recent activity across all projects
+wbrain doctor       # Health check
+```
+
 ## Commands
+
+### Main Commands
 
 | Command | Description |
 | ------- | ----------- |
-| `wbrain setup` | One-command setup (init + scan + link) |
-| `wbrain doctor` | Health check - verify everything works |
+| `wbrain setup` | One-command setup (initializes brain, scans projects, links everything) |
 | `wbrain status` | Show recent activity across all projects |
 | `wbrain ai-log` | Log AI session (called by AI assistants) |
+| `wbrain security` | Security scan + risk analysis (does both automatically) |
+| `wbrain doctor` | Health check - verify everything works |
+| `wbrain uninstall` | Remove all generated files |
+
+### Utility Commands
+
+| Command | Description |
+| ------- | ----------- |
 | `wbrain context` | Manually refresh context files |
 | `wbrain log "msg"` | Simple human log entry |
 | `wbrain logs` | View recent logs |
-| `wbrain scan` | Detect new projects |
-| `wbrain link` | Re-link projects (after adding new ones) |
-| `wbrain uninstall` | Remove all generated files |
+| `wbrain relationships` | Show and manage project relationships |
+
+### Security Commands
+
+| Command | Description |
+| ------- | ----------- |
+| `wbrain security` | **Default**: Scan + analyze vulnerabilities (does both automatically) |
+| `wbrain security --scan-only` | Only scan for vulnerabilities (skip analysis) |
+| `wbrain security --analyze-only` | Only analyze existing scan results (skip scan) |
+| `wbrain security status` | Show security status summary by project |
+| `wbrain security list` | List all security issues with detailed information |
+| `wbrain security list --compact` | Compact table view of all issues |
+| `wbrain security list --priority CRITICAL` | Filter by priority level |
+| `wbrain security list --action FIX_NOW` | Filter by action type |
+| `wbrain security fix-now` | List critical issues requiring immediate fix |
+
+**Security Workflow:**
+```bash
+# Simple: one command does everything
+wbrain security
+
+# Advanced: step-by-step control
+wbrain security --scan-only      # Step 1: Just scan
+wbrain security --analyze-only    # Step 2: Just analyze
+wbrain security status           # Check results
+wbrain security list              # See all details
+```
 
 ## Cross-Project AI Context
 
@@ -83,6 +127,25 @@ That's it. Your AI assistants now have:
    ```
 4. **Context auto-updates** - `RECENT_ACTIVITY.md` now includes this info
 5. **AI in frontend** reads context and knows about the new endpoint
+
+### Security Context
+
+WorkspaceBrain also provides security context to AI assistants:
+
+```bash
+# Run security analysis
+wbrain security
+
+# AI assistants automatically read:
+# - .brain/CONTEXT/SECURITY.md (global security summary)
+# - .brain/CONTEXT/projects/{project}.md (project-specific security alerts)
+```
+
+AI assistants can now:
+- See which security issues need immediate attention
+- Understand risk priorities (FIX_NOW, FIX_SOON, MONITOR)
+- Get recommended fixes for vulnerabilities
+- Know about exploit availability and CVSS scores
 
 ### What Gets Logged
 
@@ -155,9 +218,16 @@ workspace/
 │   ├── RULES/                      # Coding standards
 │   ├── LOGS/                       # Daily work logs
 │   │   └── 2026-01-06.md           # Structured AI session logs
+│   ├── SECURITY/                   # Security analysis data
+│   │   ├── ALERTS.yaml             # Security alerts
+│   │   └── RISK_ASSESSMENT.yaml    # Risk assessments
 │   └── CONTEXT/                    # Auto-generated (AI reads these)
 │       ├── RECENT_ACTIVITY.md      # Last 3 days summary
-│       └── OPEN_QUESTIONS.md       # Aggregated questions
+│       ├── SECURITY.md              # Security context for AI
+│       ├── OPEN_QUESTIONS.md        # Aggregated questions
+│       └── projects/               # Project-specific context
+│           ├── backend.md          # Filtered context for backend
+│           └── frontend.md         # Filtered context for frontend
 │
 ├── backend/
 │   ├── .brain -> ../brain          # Symlink to central brain
@@ -209,7 +279,7 @@ To customize, create templates in `brain/RULES/`:
 ## Example Workflow
 
 ```bash
-# Initial setup
+# Initial setup (one command does everything)
 cd ~/Documents/GitHub
 wbrain setup
 
@@ -227,13 +297,21 @@ cd ../frontend
 # Check what's happening across projects
 wbrain status
 
-# Add new project and re-link
+# Check security vulnerabilities (scan + analyze automatically)
+wbrain security
+
+# View detailed security issues
+wbrain security list
+
+# See critical issues that need immediate attention
+wbrain security fix-now
+
+# Add new project - just run setup again
 cd ..
 mkdir new-service && cd new-service
 echo '{"name": "new-service"}' > package.json
 cd ..
-wbrain scan
-wbrain link
+wbrain setup  # Re-scans and links new project
 ```
 
 ## Health Check
