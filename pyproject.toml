@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "workspacebrain"
-version = "0.1.0"
+version = "0.1.1"
 description = "A CLI tool for managing workspace brain - centralized knowledge and rules for multi-project workspaces"
 readme = "README.md"
 license = "MIT"

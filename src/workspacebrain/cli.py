@@ -9,6 +9,8 @@ from rich.console import Console
 from workspacebrain import __version__
 from rich.panel import Panel
 from rich.table import Table
+from rich.tree import Tree
+from rich.columns import Columns
 
 from workspacebrain.core.ai_logger import AISessionLogger
 from workspacebrain.core.context_generator import ContextGenerator
@@ -1262,23 +1264,41 @@ def security_scan(
     alerts_path = context_gen.save_alerts(result.alerts)
     console.print(f"  [dim]→ Saved to {alerts_path.relative_to(workspace_path)}[/]")
 
-    # Show summary
+    # Show summary in table
     by_severity: dict[str, int] = {}
     for alert in result.alerts:
         severity = alert.severity
         by_severity[severity] = by_severity.get(severity, 0) + 1
 
-    console.print("\n[bold]Summary by severity:[/]")
-    for severity in ["critical", "high", "medium", "low"]:
-        count = by_severity.get(severity, 0)
-        if count > 0:
-            color = {
-                "critical": "red",
-                "high": "yellow",
-                "medium": "blue",
-                "low": "dim",
-            }.get(severity, "white")
-            console.print(f"  [{color}]{severity.upper()}: {count}[/]")
+    if by_severity:
+        summary_table = Table(
+            title="[bold]Summary by Severity[/]",
+            show_header=True,
+            header_style="bold",
+            border_style="dim",
+        )
+        summary_table.add_column("Severity", style="bold", width=12)
+        summary_table.add_column("Count", justify="right", width=8)
+
+        severity_icons = {
+            "critical": ("🔴", "red"),
+            "high": ("🟡", "yellow"),
+            "medium": ("🔵", "blue"),
+            "low": ("⚪", "dim"),
+        }
+
+        for severity in ["critical", "high", "medium", "low"]:
+            count = by_severity.get(severity, 0)
+            if count > 0:
+                icon, color = severity_icons.get(severity, ("○", "white"))
+                summary_table.add_row(
+                    f"[{color}]{icon} {severity.upper()}[/]",
+                    f"[bold]{count}[/]",
+                )
+
+        console.print()
+        console.print(summary_table)
+        console.print()
 
 
 @security_app.command("analyze")
@@ -1350,10 +1370,27 @@ def security_analyze(
     fix_soon = len([a for a in assessments if a.action == "FIX_SOON"])
     monitor = len([a for a in assessments if a.action == "MONITOR"])
 
-    console.print("\n[bold]Action Summary:[/]")
-    console.print(f"  [red]Fix Now: {fix_now}[/]")
-    console.print(f"  [yellow]Fix Soon: {fix_soon}[/]")
-    console.print(f"  [dim]Monitor: {monitor}[/]")
+    # Show action summary in table
+    action_table = Table(
+        title="[bold]Action Summary[/]",
+        show_header=True,
+        header_style="bold",
+        border_style="dim",
+    )
+    action_table.add_column("Action", style="bold", width=12)
+    action_table.add_column("Count", justify="right", width=8)
+    action_table.add_column("Icon", width=4)
+
+    if fix_now > 0:
+        action_table.add_row("[red]⚡ FIX_NOW[/]", f"[bold red]{fix_now}[/]", "[red]⚡[/]")
+    if fix_soon > 0:
+        action_table.add_row("[yellow]⚠ FIX_SOON[/]", f"[bold yellow]{fix_soon}[/]", "[yellow]⚠[/]")
+    if monitor > 0:
+        action_table.add_row("[dim]👁 MONITOR[/]", f"[bold]{monitor}[/]", "[dim]👁[/]")
+
+    console.print()
+    console.print(action_table)
+    console.print()
 
 
 @security_app.command("status")
@@ -1385,14 +1422,21 @@ def security_status(
         console.print("[dim]Run 'wbrain security scan' and 'wbrain security analyze' first.[/]")
         return
 
-    console.print()
-    console.print(
-        Panel.fit(
-            "[bold]Security Status[/]",
-            border_style="blue",
-        )
+    # Create status table
+    status_table = Table(
+        title="[bold]Security Status[/]",
+        show_header=True,
+        header_style="bold",
+        border_style="blue",
+        row_styles=["", "dim"],
     )
-    console.print()
+
+    status_table.add_column("Project", style="cyan", width=20)
+    status_table.add_column("Type", style="dim", width=12)
+    status_table.add_column("Total", justify="right", width=8)
+    status_table.add_column("⚡ Fix Now", justify="right", width=10, style="red")
+    status_table.add_column("⚠ Fix Soon", justify="right", width=10, style="yellow")
+    status_table.add_column("👁 Monitor", justify="right", width=10, style="dim")
 
     # Group by project
     by_project: dict[str, list] = {}
@@ -1402,30 +1446,50 @@ def security_status(
             by_project[project] = []
         by_project[project].append(assessment)
 
-    # Show by project
+    # Add rows
     for project, project_assessments in sorted(by_project.items()):
+        project_type = project_assessments[0].alert.project_type
+        total = len(project_assessments)
         fix_now = len([a for a in project_assessments if a.action == "FIX_NOW"])
         fix_soon = len([a for a in project_assessments if a.action == "FIX_SOON"])
+        monitor = len([a for a in project_assessments if a.action == "MONITOR"])
 
-        console.print(f"[cyan]{project}[/]")
-        console.print(f"  Total: {len(project_assessments)} alerts")
-        if fix_now > 0:
-            console.print(f"  [red]Fix Now: {fix_now}[/]")
-        if fix_soon > 0:
-            console.print(f"  [yellow]Fix Soon: {fix_soon}[/]")
-        console.print()
+        status_table.add_row(
+            project,
+            project_type,
+            f"[bold]{total}[/]",
+            f"[red]{fix_now}[/]" if fix_now > 0 else "[dim]0[/]",
+            f"[yellow]{fix_soon}[/]" if fix_soon > 0 else "[dim]0[/]",
+            f"[dim]{monitor}[/]" if monitor > 0 else "[dim]0[/]",
+        )
 
-    # Overall summary
+    # Overall totals
     fix_now_total = len([a for a in assessments if a.action == "FIX_NOW"])
     fix_soon_total = len([a for a in assessments if a.action == "FIX_SOON"])
+    monitor_total = len([a for a in assessments if a.action == "MONITOR"])
+
+    status_table.add_row(
+        "[bold]TOTAL[/]",
+        "",
+        f"[bold]{len(assessments)}[/]",
+        f"[bold red]{fix_now_total}[/]" if fix_now_total > 0 else "[dim]0[/]",
+        f"[bold yellow]{fix_soon_total}[/]" if fix_soon_total > 0 else "[dim]0[/]",
+        f"[bold dim]{monitor_total}[/]" if monitor_total > 0 else "[dim]0[/]",
+        style="bold",
+    )
+
+    console.print()
+    console.print(status_table)
+    console.print()
 
     if fix_now_total > 0:
         console.print(
             Panel.fit(
-                f"[bold red]{fix_now_total} issues require immediate attention[/]",
+                f"[bold red]⚡ {fix_now_total} issue(s) require immediate attention[/]",
                 border_style="red",
             )
         )
+        console.print()
 
 
 @security_app.command("fix-now")
@@ -1457,14 +1521,21 @@ def security_fix_now(
         console.print("[green]✓[/] No critical issues requiring immediate fix.")
         return
 
-    console.print()
-    console.print(
-        Panel.fit(
-            f"[bold red]Fix Now: {len(fix_now)} Critical Issues[/]",
-            border_style="red",
-        )
+    # Create fix-now table
+    fix_now_table = Table(
+        title=f"[bold red]⚡ Fix Now: {len(fix_now)} Critical Issues[/]",
+        show_header=True,
+        header_style="bold",
+        border_style="red",
+        row_styles=["", "dim"],
     )
-    console.print()
+
+    fix_now_table.add_column("#", style="dim", width=3, justify="right")
+    fix_now_table.add_column("Project", style="cyan", width=15)
+    fix_now_table.add_column("CVE/Package", style="bold", width=25)
+    fix_now_table.add_column("Version", width=25)
+    fix_now_table.add_column("Risk", justify="right", width=8, style="red")
+    fix_now_table.add_column("Fix", style="green", width=30)
 
     # Group by project
     by_project: dict[str, list] = {}
@@ -1474,20 +1545,346 @@ def security_fix_now(
             by_project[project] = []
         by_project[project].append(assessment)
 
+    row_num = 1
     for project, project_assessments in sorted(by_project.items()):
-        console.print(f"[bold cyan]{project}[/]")
-        console.print()
-
         for assessment in sorted(
             project_assessments, key=lambda a: a.risk_score, reverse=True
         ):
             alert = assessment.alert
-            cve_str = f"{alert.cve_id}" if alert.cve_id else "Vulnerability"
-            console.print(f"  [red]●[/] {cve_str} in {alert.package_name}")
-            console.print(f"    Risk Score: {assessment.risk_score:.1f}/10.0")
+            cve_str = f"[bold]{alert.cve_id}[/]" if alert.cve_id else "[dim]Vulnerability[/]"
+            package_str = f"{cve_str}\n[dim]{alert.package_name}[/]"
+
+            if alert.fixed_version:
+                version_str = f"[red]{alert.package_version}[/] → [green]{alert.fixed_version}[/]"
+            else:
+                version_str = f"[red]{alert.package_version}[/]"
+
+            risk_str = f"[bold red]{assessment.risk_score:.1f}[/]"
+            fix_str = assessment.recommended_fix or "[dim]Review needed[/]"
+
+            fix_now_table.add_row(
+                str(row_num),
+                project,
+                package_str,
+                version_str,
+                risk_str,
+                fix_str,
+            )
+            row_num += 1
+
+    console.print()
+    console.print(fix_now_table)
+    console.print()
+
+
+@security_app.command("list")
+def security_list(
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path.",
+        ),
+    ] = None,
+    priority: Annotated[
+        Optional[str],
+        typer.Option(
+            "--priority",
+            "-p",
+            help="Filter by priority: CRITICAL, HIGH, MEDIUM, LOW",
+        ),
+    ] = None,
+    action: Annotated[
+        Optional[str],
+        typer.Option(
+            "--action",
+            "-a",
+            help="Filter by action: FIX_NOW, FIX_SOON, MONITOR",
+        ),
+    ] = None,
+    project: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project",
+            help="Filter by project name",
+        ),
+    ] = None,
+    compact: Annotated[
+        bool,
+        typer.Option(
+            "--compact",
+            "-c",
+            help="Show compact table view instead of detailed view",
+        ),
+    ] = False,
+) -> None:
+    """List all security issues with detailed information.
+
+    Shows comprehensive details about each security alert including:
+    - CVE ID and description
+    - Package name and versions
+    - Risk score and priority
+    - Recommended fix
+    - Impact analysis
+    """
+    # Find workspace
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+    context_gen = SecurityContextGenerator(config)
+
+    assessments = context_gen.load_assessments()
+
+    if not assessments:
+        console.print("[dim]No security assessments found.[/]")
+        console.print("[dim]Run 'wbrain security scan' and 'wbrain security analyze' first.[/]")
+        return
+
+    # Apply filters
+    filtered = assessments
+    if priority:
+        filtered = [a for a in filtered if a.priority.upper() == priority.upper()]
+    if action:
+        filtered = [a for a in filtered if a.action.upper() == action.upper()]
+    if project:
+        filtered = [a for a in filtered if a.alert.project_name == project]
+
+    if not filtered:
+        console.print("[dim]No issues found matching the filters.[/]")
+        return
+
+    # Sort by risk score (highest first)
+    filtered.sort(key=lambda a: a.risk_score, reverse=True)
+
+    if compact:
+        # Compact table view
+        _show_compact_list(filtered)
+    else:
+        # Detailed tree view
+        _show_detailed_list(filtered)
+
+
+def _show_compact_list(assessments: list) -> None:
+    """Show compact table view of security issues."""
+    table = Table(
+        title=f"[bold]Security Issues[/] [dim]({len(assessments)} total)[/]",
+        show_header=True,
+        header_style="bold",
+        border_style="blue",
+        row_styles=["", "dim"],
+    )
+
+    table.add_column("#", style="dim", width=3, justify="right")
+    table.add_column("Priority", width=10)
+    table.add_column("Action", width=10)
+    table.add_column("CVE/Package", style="cyan", width=25)
+    table.add_column("Version", width=20)
+    table.add_column("Risk", width=8, justify="right")
+    table.add_column("Project", style="blue", width=15)
+
+    for i, assessment in enumerate(assessments, 1):
+        alert = assessment.alert
+
+        # Priority badge
+        priority_colors = {
+            "CRITICAL": ("red", "🔴"),
+            "HIGH": ("yellow", "🟡"),
+            "MEDIUM": ("blue", "🔵"),
+            "LOW": ("dim", "⚪"),
+        }
+        priority_color, priority_icon = priority_colors.get(assessment.priority, ("white", "○"))
+        priority_text = f"[{priority_color}]{priority_icon} {assessment.priority}[/]"
+
+        # Action badge
+        action_colors = {
+            "FIX_NOW": ("red", "⚡"),
+            "FIX_SOON": ("yellow", "⚠"),
+            "MONITOR": ("dim", "👁"),
+        }
+        action_color, action_icon = action_colors.get(assessment.action, ("white", "○"))
+        action_text = f"[{action_color}]{action_icon} {assessment.action}[/]"
+
+        # CVE/Package
+        if alert.cve_id:
+            cve_package = f"[bold]{alert.cve_id}[/]\n[dim]{alert.package_name}[/]"
+        else:
+            cve_package = f"[bold]{alert.package_name}[/]"
+
+        # Version
+        if alert.fixed_version:
+            version_text = f"[red]{alert.package_version}[/] → [green]{alert.fixed_version}[/]"
+        else:
+            version_text = f"[red]{alert.package_version}[/]"
+
+        # Risk score
+        risk_color = "red" if assessment.risk_score >= 8.0 else "yellow" if assessment.risk_score >= 5.0 else "dim"
+        risk_text = f"[{risk_color}]{assessment.risk_score:.1f}[/]"
+
+        table.add_row(
+            str(i),
+            priority_text,
+            action_text,
+            cve_package,
+            version_text,
+            risk_text,
+            alert.project_name,
+        )
+
+    console.print()
+    console.print(table)
+    console.print()
+
+    # Summary
+    fix_now = len([a for a in assessments if a.action == "FIX_NOW"])
+    fix_soon = len([a for a in assessments if a.action == "FIX_SOON"])
+    monitor = len([a for a in assessments if a.action == "MONITOR"])
+
+    summary_cols = []
+    if fix_now > 0:
+        summary_cols.append(f"[red]⚡ Fix Now: {fix_now}[/]")
+    if fix_soon > 0:
+        summary_cols.append(f"[yellow]⚠ Fix Soon: {fix_soon}[/]")
+    if monitor > 0:
+        summary_cols.append(f"[dim]👁 Monitor: {monitor}[/]")
+
+    if summary_cols:
+        console.print(Columns(summary_cols, equal=True, expand=True))
+        console.print()
+
+
+def _show_detailed_list(assessments: list) -> None:
+    """Show detailed tree view of security issues."""
+    console.print()
+    console.print(
+        Panel.fit(
+            f"[bold]Security Issues[/] [dim]({len(assessments)} total)[/]",
+            border_style="blue",
+        )
+    )
+    console.print()
+
+    # Group by project
+    by_project: dict[str, list] = {}
+    for assessment in assessments:
+        project_name = assessment.alert.project_name
+        if project_name not in by_project:
+            by_project[project_name] = []
+        by_project[project_name].append(assessment)
+
+    # Create tree structure
+    root = Tree("[bold cyan]Security Issues[/]")
+
+    for project_name, project_assessments in sorted(by_project.items()):
+        project_type = project_assessments[0].alert.project_type
+        project_branch = root.add(
+            f"[bold cyan]{project_name}[/] [dim]({project_type})[/] [dim]- {len(project_assessments)} issue(s)[/]"
+        )
+
+        for assessment in project_assessments:
+            alert = assessment.alert
+
+            # Priority and action badges
+            priority_colors = {
+                "CRITICAL": ("red", "🔴"),
+                "HIGH": ("yellow", "🟡"),
+                "MEDIUM": ("blue", "🔵"),
+                "LOW": ("dim", "⚪"),
+            }
+            priority_color, priority_icon = priority_colors.get(assessment.priority, ("white", "○"))
+            priority_text = f"[{priority_color}]{priority_icon} {assessment.priority}[/]"
+
+            action_colors = {
+                "FIX_NOW": ("red", "⚡"),
+                "FIX_SOON": ("yellow", "⚠"),
+                "MONITOR": ("dim", "👁"),
+            }
+            action_color, action_icon = action_colors.get(assessment.action, ("white", "○"))
+            action_text = f"[{action_color}]{action_icon} {assessment.action}[/]"
+
+            # Issue header
+            if alert.cve_id:
+                issue_header = f"{priority_text} {action_text} [bold]{alert.cve_id}[/] in [cyan]{alert.package_name}[/]"
+            else:
+                issue_header = f"{priority_text} {action_text} [cyan]{alert.package_name}[/]"
+
+            issue_branch = project_branch.add(issue_header)
+
+            # Details table
+            details_table = Table(show_header=False, box=None, padding=(0, 1))
+            details_table.add_column("Label", style="bold", width=18)
+            details_table.add_column("Value", style="")
+
+            # Version info
+            if alert.fixed_version:
+                version_info = f"[red]{alert.package_version}[/] → [green]{alert.fixed_version}[/]"
+            else:
+                version_info = f"[red]{alert.package_version}[/] [dim](no fix available)[/]"
+            details_table.add_row("Version", version_info)
+
+            # Risk score
+            risk_color = "red" if assessment.risk_score >= 8.0 else "yellow" if assessment.risk_score >= 5.0 else "dim"
+            details_table.add_row("Risk Score", f"[{risk_color}]{assessment.risk_score:.1f}/10.0[/]")
+
+            # CVSS
+            if alert.cvss_score:
+                details_table.add_row("CVSS", f"{alert.cvss_score:.1f}")
+
+            # Severity
+            severity_colors = {
+                "critical": "red",
+                "high": "yellow",
+                "medium": "blue",
+                "low": "dim",
+            }
+            severity_color = severity_colors.get(alert.severity.lower(), "white")
+            details_table.add_row("Severity", f"[{severity_color}]{alert.severity.upper()}[/]")
+
+            # Source
+            details_table.add_row("Source", alert.source)
+
+            # Description (truncated)
+            if alert.description:
+                desc = alert.description
+                if len(desc) > 150:
+                    desc = desc[:150] + "..."
+                details_table.add_row("Description", desc)
+
+            # Recommended fix
             if assessment.recommended_fix:
-                console.print(f"    Fix: {assessment.recommended_fix}")
-            console.print()
+                details_table.add_row("Fix", f"[green]{assessment.recommended_fix}[/]")
+
+            # Exploit warning
+            if alert.exploit_available:
+                exploit_maturity = alert.exploit_maturity or "available"
+                details_table.add_row("⚠ Exploit", f"[bold red]{exploit_maturity}[/]")
+
+            # Add table to branch
+            issue_branch.add(details_table)
+
+    console.print(root)
+    console.print()
+
+    # Summary
+    total = len(assessments)
+    fix_now = len([a for a in assessments if a.action == "FIX_NOW"])
+    fix_soon = len([a for a in assessments if a.action == "FIX_SOON"])
+    monitor = len([a for a in assessments if a.action == "MONITOR"])
+
+    summary_parts = [f"[bold]Total: {total}[/]"]
+    if fix_now > 0:
+        summary_parts.append(f"[red]⚡ Fix Now: {fix_now}[/]")
+    if fix_soon > 0:
+        summary_parts.append(f"[yellow]⚠ Fix Soon: {fix_soon}[/]")
+    if monitor > 0:
+        summary_parts.append(f"[dim]👁 Monitor: {monitor}[/]")
+
+    console.print(Columns(summary_parts, equal=True, expand=True))
+    console.print()
 
 
 # Register security subcommands
