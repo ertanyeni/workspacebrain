@@ -7,6 +7,7 @@ from typing import Optional
 from ..models import AISessionEntry, BrainConfig
 from .log_parser import LogParser
 from .relationship_manager import RelationshipManager
+from .security_context_generator import SecurityContextGenerator
 
 
 class ContextGenerator:
@@ -21,6 +22,7 @@ class ContextGenerator:
         self.config = config
         self.parser = LogParser(config)
         self.relationship_manager = RelationshipManager(config)
+        self.security_generator = SecurityContextGenerator(config)
 
     def refresh_all_context(self, days: int = 3) -> dict[str, Path]:
         """Regenerate all context files.
@@ -342,6 +344,12 @@ class ContextGenerator:
                 lines.append(f"- [{q['project']}] {q['question']}")
             lines.append("")
 
+        # Add security context
+        security_context = self._get_security_context_for_project(project_name)
+        if security_context:
+            lines.append(security_context)
+            lines.append("")
+
         lines.extend([
             "---",
             f"*Filtered context for {project_name}. Only includes related projects.*",
@@ -380,4 +388,22 @@ class ContextGenerator:
         for project_name, path in project_contexts.items():
             generated[f"project:{project_name}"] = path
 
+        # Generate security context if assessments exist
+        assessments = self.security_generator.load_assessments()
+        if assessments:
+            security_path = self.security_generator.generate_global_security_context(
+                assessments
+            )
+            generated["security"] = security_path
+
         return generated
+
+    def _get_security_context_for_project(self, project_name: str) -> Optional[str]:
+        """Get security context section for a project."""
+        assessments = self.security_generator.load_assessments()
+        if not assessments:
+            return None
+
+        return self.security_generator.generate_project_security_context(
+            project_name, assessments
+        )
