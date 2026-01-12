@@ -17,8 +17,11 @@ from workspacebrain.core.installer import BrainInstaller
 from workspacebrain.core.linker import AI_RULE_FILES, BrainLinker, unlink_project
 from workspacebrain.core.log_parser import LogParser
 from workspacebrain.core.relationship_manager import RelationshipManager
+from workspacebrain.core.risk_scorer import RiskScorer
 from workspacebrain.core.scanner import WorkspaceScanner
-from workspacebrain.models import AISessionEntry, BrainConfig
+from workspacebrain.core.security_analyzer import SecurityAnalyzer
+from workspacebrain.core.security_context_generator import SecurityContextGenerator
+from workspacebrain.models import AISessionEntry, BrainConfig, SecurityAlert
 
 app = typer.Typer(
     name="workspacebrain",
@@ -1203,6 +1206,292 @@ def uninstall(
             border_style="green",
         )
     )
+
+
+# Security commands group
+security_app = typer.Typer(
+    name="security",
+    help="Security analysis and vulnerability management.",
+)
+
+
+@security_app.command("scan")
+def security_scan(
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path (searches parent directories if not specified).",
+        ),
+    ] = None,
+) -> None:
+    """Scan all projects for security vulnerabilities.
+
+    Collects alerts from:
+    - GitHub Dependabot (if GitHub token available)
+    - npm audit (Node.js projects)
+    - pip-audit (Python projects)
+    - cargo audit (Rust projects)
+    """
+    # Find workspace
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+    analyzer = SecurityAnalyzer(config)
+
+    with console.status("[bold green]Scanning for security vulnerabilities..."):
+        result = analyzer.scan_all()
+
+    if not result.success:
+        console.print(f"[bold red]✗[/] Scan failed: {result.error}")
+        raise typer.Exit(code=1)
+
+    if not result.alerts:
+        console.print("[green]✓[/] No security vulnerabilities found.")
+        return
+
+    console.print(f"[green]✓[/] Found [bold]{len(result.alerts)}[/] security alert(s)")
+
+    # Save alerts
+    context_gen = SecurityContextGenerator(config)
+    alerts_path = context_gen.save_alerts(result.alerts)
+    console.print(f"  [dim]→ Saved to {alerts_path.relative_to(workspace_path)}[/]")
+
+    # Show summary
+    by_severity: dict[str, int] = {}
+    for alert in result.alerts:
+        severity = alert.severity
+        by_severity[severity] = by_severity.get(severity, 0) + 1
+
+    console.print("\n[bold]Summary by severity:[/]")
+    for severity in ["critical", "high", "medium", "low"]:
+        count = by_severity.get(severity, 0)
+        if count > 0:
+            color = {
+                "critical": "red",
+                "high": "yellow",
+                "medium": "blue",
+                "low": "dim",
+            }.get(severity, "white")
+            console.print(f"  [{color}]{severity.upper()}: {count}[/]")
+
+
+@security_app.command("analyze")
+def security_analyze(
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path.",
+        ),
+    ] = None,
+) -> None:
+    """Analyze security alerts and generate risk assessments.
+
+    Performs risk scoring, prioritization, and generates AI-friendly context.
+    """
+    # Find workspace
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+
+    # Load alerts
+    context_gen = SecurityContextGenerator(config)
+    alerts_path = config.security_alerts_path
+
+    if not alerts_path.exists():
+        console.print(
+            "[bold yellow]![/] No alerts found. Run 'wbrain security scan' first."
+        )
+        raise typer.Exit(code=1)
+
+    # Load alerts from YAML
+    import yaml
+    from datetime import datetime
+
+    alerts_data = yaml.safe_load(alerts_path.read_text(encoding="utf-8"))
+    alerts = []
+    for alert_data in alerts_data.get("alerts", []):
+        # Parse datetime if it's a string
+        if "detected_at" in alert_data and isinstance(alert_data["detected_at"], str):
+            alert_data["detected_at"] = datetime.fromisoformat(alert_data["detected_at"])
+        alerts.append(SecurityAlert(**alert_data))
+
+    if not alerts:
+        console.print("[green]✓[/] No alerts to analyze.")
+        return
+
+    # Analyze
+    scorer = RiskScorer(config)
+    with console.status("[bold green]Analyzing risks..."):
+        assessments = scorer.assess_alerts(alerts)
+
+    # Save assessments
+    assessment_path = context_gen.save_assessments(assessments)
+    console.print(f"[green]✓[/] Risk assessment complete")
+    console.print(f"  [dim]→ Saved to {assessment_path.relative_to(workspace_path)}[/]")
+
+    # Generate context
+    security_path = context_gen.generate_global_security_context(assessments)
+    console.print(f"  [dim]→ Context: {security_path.relative_to(workspace_path)}[/]")
+
+    # Show summary
+    fix_now = len([a for a in assessments if a.action == "FIX_NOW"])
+    fix_soon = len([a for a in assessments if a.action == "FIX_SOON"])
+    monitor = len([a for a in assessments if a.action == "MONITOR"])
+
+    console.print("\n[bold]Action Summary:[/]")
+    console.print(f"  [red]Fix Now: {fix_now}[/]")
+    console.print(f"  [yellow]Fix Soon: {fix_soon}[/]")
+    console.print(f"  [dim]Monitor: {monitor}[/]")
+
+
+@security_app.command("status")
+def security_status(
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path.",
+        ),
+    ] = None,
+) -> None:
+    """Show security status summary."""
+    # Find workspace
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+    context_gen = SecurityContextGenerator(config)
+
+    assessments = context_gen.load_assessments()
+
+    if not assessments:
+        console.print("[dim]No security assessments found.[/]")
+        console.print("[dim]Run 'wbrain security scan' and 'wbrain security analyze' first.[/]")
+        return
+
+    console.print()
+    console.print(
+        Panel.fit(
+            "[bold]Security Status[/]",
+            border_style="blue",
+        )
+    )
+    console.print()
+
+    # Group by project
+    by_project: dict[str, list] = {}
+    for assessment in assessments:
+        project = assessment.alert.project_name
+        if project not in by_project:
+            by_project[project] = []
+        by_project[project].append(assessment)
+
+    # Show by project
+    for project, project_assessments in sorted(by_project.items()):
+        fix_now = len([a for a in project_assessments if a.action == "FIX_NOW"])
+        fix_soon = len([a for a in project_assessments if a.action == "FIX_SOON"])
+
+        console.print(f"[cyan]{project}[/]")
+        console.print(f"  Total: {len(project_assessments)} alerts")
+        if fix_now > 0:
+            console.print(f"  [red]Fix Now: {fix_now}[/]")
+        if fix_soon > 0:
+            console.print(f"  [yellow]Fix Soon: {fix_soon}[/]")
+        console.print()
+
+    # Overall summary
+    fix_now_total = len([a for a in assessments if a.action == "FIX_NOW"])
+    fix_soon_total = len([a for a in assessments if a.action == "FIX_SOON"])
+
+    if fix_now_total > 0:
+        console.print(
+            Panel.fit(
+                f"[bold red]{fix_now_total} issues require immediate attention[/]",
+                border_style="red",
+            )
+        )
+
+
+@security_app.command("fix-now")
+def security_fix_now(
+    workspace_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Workspace path.",
+        ),
+    ] = None,
+) -> None:
+    """List all issues that need immediate fixing."""
+    # Find workspace
+    if workspace_path is None:
+        workspace_path = _find_workspace_with_brain(Path.cwd())
+        if workspace_path is None:
+            console.print("[bold red]✗[/] No brain found.")
+            raise typer.Exit(code=1)
+
+    config = BrainConfig(workspace_path=workspace_path)
+    context_gen = SecurityContextGenerator(config)
+
+    assessments = context_gen.load_assessments()
+    fix_now = [a for a in assessments if a.action == "FIX_NOW"]
+
+    if not fix_now:
+        console.print("[green]✓[/] No critical issues requiring immediate fix.")
+        return
+
+    console.print()
+    console.print(
+        Panel.fit(
+            f"[bold red]Fix Now: {len(fix_now)} Critical Issues[/]",
+            border_style="red",
+        )
+    )
+    console.print()
+
+    # Group by project
+    by_project: dict[str, list] = {}
+    for assessment in fix_now:
+        project = assessment.alert.project_name
+        if project not in by_project:
+            by_project[project] = []
+        by_project[project].append(assessment)
+
+    for project, project_assessments in sorted(by_project.items()):
+        console.print(f"[bold cyan]{project}[/]")
+        console.print()
+
+        for assessment in sorted(
+            project_assessments, key=lambda a: a.risk_score, reverse=True
+        ):
+            alert = assessment.alert
+            cve_str = f"{alert.cve_id}" if alert.cve_id else "Vulnerability"
+            console.print(f"  [red]●[/] {cve_str} in {alert.package_name}")
+            console.print(f"    Risk Score: {assessment.risk_score:.1f}/10.0")
+            if assessment.recommended_fix:
+                console.print(f"    Fix: {assessment.recommended_fix}")
+            console.print()
+
+
+# Register security subcommands
+app.add_typer(security_app)
 
 
 if __name__ == "__main__":

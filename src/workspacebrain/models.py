@@ -134,6 +134,21 @@ class BrainConfig(BaseModel):
         """Get the path to relationships.yaml file."""
         return self.brain_path / "relationships.yaml"
 
+    @property
+    def security_path(self) -> Path:
+        """Get the path to SECURITY directory."""
+        return self.brain_path / "SECURITY"
+
+    @property
+    def security_alerts_path(self) -> Path:
+        """Get the path to ALERTS.yaml file."""
+        return self.security_path / "ALERTS.yaml"
+
+    @property
+    def security_config_path(self) -> Path:
+        """Get the path to security config.yaml file."""
+        return self.security_path / "config.yaml"
+
 
 class AISessionEntry(BaseModel):
     """Structured AI session log entry for cross-project context sharing."""
@@ -195,3 +210,101 @@ class AISessionEntry(BaseModel):
         lines.append("")
 
         return "\n".join(lines)
+
+
+class SecurityAlert(BaseModel):
+    """A single security alert/vulnerability."""
+
+    cve_id: Optional[str] = None  # CVE-YYYY-NNNNN
+    package_name: str
+    package_version: str
+    fixed_version: Optional[str] = None
+    severity: str  # "critical", "high", "medium", "low"
+    cvss_score: Optional[float] = Field(None, ge=0.0, le=10.0)
+    cvss_vector: Optional[str] = None
+    description: Optional[str] = None
+    source: str  # "dependabot", "npm-audit", "pip-audit", "cargo-audit"
+    project_name: str
+    project_type: str
+    detected_at: datetime = Field(default_factory=datetime.now)
+    exploit_available: bool = False
+    exploit_maturity: Optional[str] = None  # "proof-of-concept", "weaponized", "none"
+    advisory_url: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for YAML serialization."""
+        return {
+            "cve_id": self.cve_id,
+            "package_name": self.package_name,
+            "package_version": self.package_version,
+            "fixed_version": self.fixed_version,
+            "severity": self.severity,
+            "cvss_score": self.cvss_score,
+            "cvss_vector": self.cvss_vector,
+            "description": self.description,
+            "source": self.source,
+            "project_name": self.project_name,
+            "project_type": self.project_type,
+            "detected_at": self.detected_at.isoformat(),
+            "exploit_available": self.exploit_available,
+            "exploit_maturity": self.exploit_maturity,
+            "advisory_url": self.advisory_url,
+        }
+
+
+class SecurityRiskAssessment(BaseModel):
+    """Risk assessment result for a security alert."""
+
+    alert: SecurityAlert
+    priority: str  # "CRITICAL", "HIGH", "MEDIUM", "LOW"
+    action: str  # "FIX_NOW", "FIX_SOON", "MONITOR"
+    risk_score: float = Field(ge=0.0, le=10.0)  # Calculated risk score
+    reasoning: str  # AI-generated reasoning for the assessment
+    impact_analysis: Optional[str] = None  # How this affects the project
+    recommended_fix: Optional[str] = None  # Specific fix recommendation
+    assessed_at: datetime = Field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for YAML serialization."""
+        return {
+            "alert": self.alert.to_dict(),
+            "priority": self.priority,
+            "action": self.action,
+            "risk_score": self.risk_score,
+            "reasoning": self.reasoning,
+            "impact_analysis": self.impact_analysis,
+            "recommended_fix": self.recommended_fix,
+            "assessed_at": self.assessed_at.isoformat(),
+        }
+
+
+class SecurityContext(BaseModel):
+    """Security context for a project."""
+
+    project_name: str
+    total_alerts: int
+    critical_count: int
+    high_count: int
+    medium_count: int
+    low_count: int
+    fix_now_count: int
+    fix_soon_count: int
+    monitor_count: int
+    last_updated: datetime = Field(default_factory=datetime.now)
+    assessments: list[SecurityRiskAssessment] = Field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for YAML serialization."""
+        return {
+            "project_name": self.project_name,
+            "total_alerts": self.total_alerts,
+            "critical_count": self.critical_count,
+            "high_count": self.high_count,
+            "medium_count": self.medium_count,
+            "low_count": self.low_count,
+            "fix_now_count": self.fix_now_count,
+            "fix_soon_count": self.fix_soon_count,
+            "monitor_count": self.monitor_count,
+            "last_updated": self.last_updated.isoformat(),
+            "assessments": [a.to_dict() for a in self.assessments],
+        }

@@ -293,10 +293,16 @@ pipx uninstall workspacebrain
 git clone https://github.com/USER/workspacebrain.git
 cd workspacebrain
 
-python -m venv .venv
-source .venv/bin/activate
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
+# Install in development mode
 pip install -e ".[dev]"
+
+# Verify installation
+wbrain --version
+wbrain --help
 
 # Run tests
 pytest
@@ -304,6 +310,11 @@ pytest
 # With coverage
 pytest --cov=workspacebrain
 ```
+
+### Requirements
+
+- Python 3.9 or higher
+- pip (latest version recommended)
 
 ## License
 
